@@ -44,10 +44,12 @@ import "@openzeppelin/contracts/token/ERC1155/ERC1155.sol";
 // how much of the tokens is owned by this account. For each pool we record its "total shares" amount, which is the sum
 // of all the accounts' shares. Shares are like Uniswap-V2's liquidity token. But they are not implemented as ERC20 here.
 
-abstract contract GridexLogicAbstract is ERC1155{
+contract GridexLogicBase{
 	uint public stock_priceDiv;
 	uint public money_priceMul;
+}
 
+abstract contract GridexLogicAbstract is GridexLogicBase, ERC1155(""){
 	struct Pool {
 		uint96 totalShares;
 		uint96 totalStock;
@@ -88,10 +90,15 @@ abstract contract GridexLogicAbstract is ERC1155{
 		factoryAddress = msg.sender;
 	}
 	
-	function setFee(uint fee) payable external {
+	function setFee(uint fee) external payable  {
 		require(msg.sender == factoryAddress, 'only factoryAddress');
 		_fee = fee;
 	}
+
+  function setURI(string memory newuri) external payable {
+		require(msg.sender == factoryAddress, 'only factoryAddress');
+    _setURI(newuri);
+  }
 
 	function getFee() internal view returns(uint) {
 		return _fee;
@@ -462,8 +469,6 @@ contract GridexLogic256 is GridexLogicAbstract {
                           (uint(120194-65536)<<(14*16))| //extractNthU16(Y,14)==Math.pow(2,16)*(Math.pow(alpha,16*14)-1) 
                           (uint(125515-65536)<<(15*16)); //extractNthU16(Y,15)==Math.pow(2,16)*(Math.pow(alpha,16*15)-1) 
 
-	constructor(string memory uri_)  ERC1155(uri_) {}	
-
 	function getPrice(uint grid) internal pure override returns (uint) {
 		require(grid < GridCount, "invalid-grid");
 		(uint head, uint tail) = (grid/256, grid%256);
@@ -503,8 +508,6 @@ contract GridexLogic64 is GridexLogicAbstract {
                           (uint(110218-65536)<< 6*16)| // extractNthU16(Y, 6)==Math.pow(2,16)*(Math.pow(alpha,8*6) -1)
                           (uint(120194-65536)<< 7*16); // extractNthU16(Y, 7)==Math.pow(2,16)*(Math.pow(alpha,8*7) -1)
 
-	constructor(string memory uri_)  ERC1155(uri_) {}	
-
 	function getPrice(uint grid) internal pure override returns (uint) {
 		// GridCount实际最大 15199
 		require(grid < GridCount, "invalid-grid");
@@ -542,8 +545,6 @@ contract GridexLogic16 is GridexLogicAbstract {
                           (uint(115098-65536)<<13*16)| // extractNthU16(Y,13)==Math.pow(2,16)*(Math.pow(alpha,13) -1)
                           (uint(120194-65536)<<14*16)| // extractNthU16(Y,14)==Math.pow(2,16)*(Math.pow(alpha,14) -1)
                           (uint(125515-65536)<<15*16); // extractNthU16(Y,15)==Math.pow(2,16)*(Math.pow(alpha,15) -1)
-
-	constructor(string memory uri_)  ERC1155(uri_) {}	
 
 	function getPrice(uint grid) internal pure override returns (uint) {
 		require(grid < GridCount, "invalid-grid");
@@ -631,4 +632,9 @@ contract GridexFactory is Ownable{
 		address pair = getAddress(stock, money, impl);
 		GridexLogicAbstract(pair).setFee(fee);
 	}
+
+	function setURI(address stock, address money, address impl,string memory newuri) external onlyOwner {
+		address pair = getAddress(stock, money, impl);
+		GridexLogicAbstract(pair).setURI(newuri);
+  }
 }
