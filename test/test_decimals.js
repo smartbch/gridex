@@ -1,0 +1,171 @@
+const { expect } = require("chai");
+const { ethers } = require("hardhat");
+const BigNumber = require('bignumber.js')
+const { createERC20 } = require("./utils/util")
+const { getSharesDeltaAndSoldRatio, getPairTokenResult } = require("./utils/web_util")
+const { getResult } = require("./utils/price_util")
+
+const RatioBase = BigNumber(10 ** 19)
+const PriceBase = BigNumber(2 ** 68)
+const FeeBase = 10000;
+
+const gridexTypes = [16] // [16, 64, 256]
+const decimalsArr = [[10, 10], [10, 8], [8, 10]] // [[10, 10], [10, 8], [8, 10]]
+
+decimalsArr.forEach((decimals) => {
+  describe(`test_decimals: ${decimals}`, function () {
+    let owner;
+    let stock;
+    let money;
+    let params;
+    let gridexLogic;
+    let fee;
+    let grid;
+    let stockDecimal;
+    let moneyDecimal;
+
+    const gridexType = gridexTypes[0]
+    const { grid2price, price2grid } = getResult(gridexType)
+    before(async function () {
+      [owner] = await ethers.getSigners();
+      [stockDecimal, moneyDecimal] = decimals
+      const MaxAmount = ethers.utils.parseUnits("1", 50)
+      stock = await createERC20(ethers, "stockName", "stockSymbol", [{ address: owner.address, amount: MaxAmount }], stockDecimal);
+      money = await createERC20(ethers, "moneyName", "moneySymbol", [{ address: owner.address, amount: MaxAmount }], moneyDecimal);
+      const GridexLogic = await ethers.getContractFactory(`GridexLogic${gridexType}`);
+      gridexLogic = await GridexLogic.deploy();
+      const GridexFactory = await ethers.getContractFactory("GridexFactory");
+      const gridexFactory = await GridexFactory.deploy();
+      await gridexFactory.create(stock.address, money.address, gridexLogic.address)
+      const gridexLogicAddress = await gridexFactory.getAddress(stock.address, money.address, gridexLogic.address)
+      gridexLogic = await GridexLogic.attach(gridexLogicAddress)
+      params = await gridexLogic.loadParams();
+      fee = params.fee.toNumber();
+      params = {
+        ...params,
+        priceMul: params.priceMul.toString(),
+        priceDiv: params.priceDiv.toString()
+      }
+      stock.approve(gridexLogicAddress, MaxAmount)
+      money.approve(gridexLogicAddress, MaxAmount)
+
+      await getDeltaAmout()
+    })
+
+    it("batchChangeShares", async function () {
+      const price = BigNumber(1.02).multipliedBy(PriceBase) // 不考虑精度的price
+      grid = price2grid(price)
+      const stockAmount = BigNumber(10e13)
+      const minPrice = PriceBase.multipliedBy(0.9)
+      const maxPrice = PriceBase.multipliedBy(1.1)
+      const { amount, sharesResult } = getPairTokenResult(params, gridexType, price, minPrice, maxPrice, stockAmount, 0)
+      const gridexLogicTemp = {
+        isContact: () => false
+      }
+      const { sharesDeltaAndSoldRatios, beginGrid } = await getSharesDeltaAndSoldRatio(params, gridexLogicTemp, gridexType, price, sharesResult.beginGrid, sharesResult.stockIns.map(v => BigNumber(v)), sharesResult.moneyIns.map(v => BigNumber(v)))
+      await gridexLogic.batchChangeShares(beginGrid, sharesDeltaAndSoldRatios.map(v => v.toString()), stockAmount.multipliedBy(1.001).toFixed(0), BigNumber(amount).multipliedBy(1.001).toFixed(0))
+      const { stockDetal, moneyDetal } = await getDeltaAmout()
+      expect(stockDetal.abs()).to.equal(stockAmount.minus(1).toFixed(0))
+      expect(moneyDetal.abs()).to.above(parseInt(amount * 0.9)).below(amount)
+    });
+
+    it("trade amount: 0", async function () {
+      const amount = 0;
+      {
+        await gridexLogic.sellToPools(PriceBase.multipliedBy(0.9).toFixed(0), amount, grid + 20, grid - 20)
+        const { stockDetal, moneyDetal } = await getDeltaAmout()
+        expect(moneyDetal).to.equal(stockDetal).equal(0)
+      }
+      {
+        await gridexLogic.buyFromPools(PriceBase.multipliedBy(1.1).toFixed(0), amount, grid - 20, grid + 20)
+        const { stockDetal, moneyDetal } = await getDeltaAmout()
+        expect(moneyDetal).to.equal(stockDetal).equal(0)
+      }
+    });
+
+    it("trade amount: 10", async function () {
+      const amount = 10;
+      if (stockDecimal > moneyDecimal) {
+        await expect(gridexLogic.sellToPools(0, amount, grid + 20, grid - 20)).to.be.revertedWith("Not equal 0")
+        await expect(gridexLogic.buyFromPools(PriceBase.multipliedBy(1.1).toFixed(0), amount, grid - 20, grid + 20)).to.be.revertedWith("Not equal 0")
+        return
+      }
+      {
+        await gridexLogic.sellToPools(0, amount, grid + 20, grid - 20)
+        const { stockDetal, moneyDetal } = await getDeltaAmout()
+        expect(stockDetal.abs()).to.least(Math.floor(amount * (FeeBase - fee) / FeeBase)).most(amount)
+        expect(moneyDetal.mul(10 ** stockDecimal).mul(1000).div(stockDetal.abs()).div(10 ** moneyDecimal)).to.above(900).below(1100)
+      }
+      {
+        await gridexLogic.buyFromPools(PriceBase.multipliedBy(1.1).toFixed(0), amount, grid - 20, grid + 20)
+        const { stockDetal, moneyDetal } = await getDeltaAmout()
+        expect(stockDetal.abs()).to.least(Math.floor(amount * (FeeBase - fee) / FeeBase)).most(amount)
+        expect(moneyDetal.abs().mul(10 ** stockDecimal).mul(1000).div(stockDetal).div(10 ** moneyDecimal)).to.above(900).below(1100)
+      }
+    });
+
+    it("trade amount: 100", async function () {
+      const amount = 100
+      {
+        await gridexLogic.sellToPools(0, amount, grid + 20, grid - 20)
+        const { stockDetal, moneyDetal } = await getDeltaAmout()
+        expect(stockDetal.abs()).to.least(Math.floor(amount * (FeeBase - fee) / FeeBase)).most(amount)
+        expect(moneyDetal.mul(10 ** stockDecimal).mul(1000).div(stockDetal.abs()).div(10 ** moneyDecimal)).to.above(900).below(1100)
+      }
+      {
+        await gridexLogic.buyFromPools(PriceBase.multipliedBy(1.1).toFixed(0), amount, grid - 20, grid + 20)
+        const { stockDetal, moneyDetal } = await getDeltaAmout()
+        expect(stockDetal.abs()).to.least(Math.floor(amount * (FeeBase - fee) / FeeBase)).most(amount)
+        expect(moneyDetal.abs().mul(10 ** stockDecimal).mul(1000).div(stockDetal).div(10 ** moneyDecimal)).to.above(900).below(1100)
+      }
+    });
+
+    it("trade amount: 1000", async function () {
+      const amount = 1000
+      {
+        await gridexLogic.sellToPools(0, amount, grid + 20, grid - 20)
+        const { stockDetal, moneyDetal } = await getDeltaAmout()
+        expect(stockDetal.abs()).to.least(Math.floor(amount * (FeeBase - fee) / FeeBase) - 1).most(amount)
+        expect(moneyDetal.mul(10 ** stockDecimal).mul(1000).div(stockDetal.abs()).div(10 ** moneyDecimal)).to.above(900).below(1100)
+      }
+      {
+        await gridexLogic.buyFromPools(PriceBase.multipliedBy(1.1).toFixed(0), amount, grid - 20, grid + 20)
+        const { stockDetal, moneyDetal } = await getDeltaAmout()
+        expect(stockDetal.abs()).to.least(Math.floor(amount * (FeeBase - fee) / FeeBase) - 1).most(amount)
+        expect(moneyDetal.abs().mul(10 ** stockDecimal).mul(1000).div(stockDetal).div(10 ** moneyDecimal)).to.above(900).below(1100)
+      }
+    });
+
+    it("trade amount: 5*10e12", async function () {
+      const amount = 5 * 10e12
+      {
+        await gridexLogic.sellToPools(0, amount, grid + 20, grid - 20)
+        const { stockDetal, moneyDetal } = await getDeltaAmout()
+        expect(stockDetal.abs()).to.least(Math.floor(amount * (FeeBase - fee) / FeeBase) - 1).most(amount)
+        expect(moneyDetal.mul(10 ** stockDecimal).mul(1000).div(stockDetal.abs()).div(10 ** moneyDecimal)).to.above(900).below(1100)
+      }
+      {
+        await gridexLogic.buyFromPools(PriceBase.multipliedBy(1.1).toFixed(0), amount, grid - 20, grid + 20)
+        const { stockDetal, moneyDetal } = await getDeltaAmout()
+        expect(stockDetal.abs()).to.least(Math.floor(amount * (FeeBase - fee) / FeeBase) - 1).most(amount)
+        expect(moneyDetal.abs().mul(10 ** stockDecimal).mul(1000).div(stockDetal).div(10 ** moneyDecimal)).to.above(900).below(1100)
+      }
+    });
+
+    const balanceCache = []
+    async function getDeltaAmout(newIndex = -1, oldIndex = -1) {
+      const stockBalance = await stock.balanceOf(owner.address);
+      const moneyBalance = await money.balanceOf(owner.address);
+      balanceCache[balanceCache.length] = [stockBalance, moneyBalance]
+      if (balanceCache.length === 1) {
+        return
+      }
+      const newBalance = balanceCache[newIndex === -1 ? (balanceCache.length - 1) : newIndex]
+      const oldBalance = balanceCache[oldIndex === -1 ? (balanceCache.length - 2) : oldIndex]
+      return {
+        stockDetal: newBalance[0].sub(oldBalance[0]),
+        moneyDetal: newBalance[1].sub(oldBalance[1])
+      }
+    }
+  });
+})

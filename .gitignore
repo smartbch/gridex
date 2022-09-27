@@ -1,4 +1,8 @@
 
 *.swp
-*.json~
-*.un~
+*.sol~
+node_modules/
+cache/
+artifacts/
+coverage
+coverage.json
