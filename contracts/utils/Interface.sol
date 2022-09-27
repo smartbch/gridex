@@ -1,5 +1,3 @@
-pragma solidity 0.8.15;
-
 interface IGridexInterface {
     struct Pool {
         uint96 totalShares;
