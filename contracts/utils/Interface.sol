@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: BUSL-1.1
+pragma solidity 0.8.15;
+
 interface IGridexInterface {
     struct Pool {
         uint96 totalShares;
@@ -10,6 +13,7 @@ interface IGridexInterface {
         address money;
         uint256 priceDiv;
         uint256 priceMul;
+        uint256 fee;
     }
 }
 
@@ -29,8 +33,18 @@ interface IGridexPair {
     function batchChangeShares(
         uint256 grid,
         int160[] calldata sharesDelta,
-        int256 maxStock,
-        int256 maxMoney
+        uint256 maxStock,
+        uint256 maxMoney
+    ) external payable returns (int256 paidStock, int256 paidMoney);
+
+    function arbitrageAndBatchChangeShares(
+        uint256 lowGrid,
+        uint256 midGrid,
+        uint256 highGrid,
+        uint256 grid,
+        int160[] calldata sharesDelta,
+        uint256 maxStock,
+        uint256 maxMoney
     ) external payable returns (int256 paidStock, int256 paidMoney);
 
     function buyFromPools(
@@ -47,12 +61,28 @@ interface IGridexPair {
         uint256 stopGrid
     ) external payable returns (uint256 totalGotMoney, uint256 totalSoldStock);
 
-    function getMinAmount(uint256 stockToBuy, uint256 poolTotalStock)
-        external
-        pure
-        returns (uint256);
-
     function grid2price(uint256 grid) external pure returns (uint256);
 
     function price2Grid(uint256 price) external view returns (uint256);
+
+    function calcPool(
+        uint256 priceDiv,
+        uint256 priceLo,
+        uint256 priceHi,
+        uint96 totalStock,
+        uint64 soldRatio
+    )
+        external
+        pure
+        returns (
+            uint256 leftStock,
+            uint256 soldStock,
+            uint256 gotMoney
+        );
+
+    function calcPrice(
+        uint256 priceLo,
+        uint256 priceHi,
+        uint64 soldRatio
+    ) external pure returns (uint256 price);
 }

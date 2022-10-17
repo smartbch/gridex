@@ -2,7 +2,6 @@ const { expect } = require("chai");
 const { ethers } = require("hardhat");
 const BigNumber = require('bignumber.js')
 const { createERC20 } = require("./utils/util")
-const { getSharesDeltaAndSoldRatio, getPairTokenResult } = require("./utils/web_util")
 const { getResult } = require("./utils/price_util")
 
 const RatioBase = BigNumber(10 ** 19)
@@ -10,7 +9,7 @@ const PriceBase = BigNumber(2 ** 68)
 const FeeBase = 10000;
 
 const gridexTypes = [16, 64, 256] // [16, 64, 256]
-const decimalsArr = [[18, 18], [10, 18], [18, 15]] // [[18, 18], [10, 18], [18, 15]]
+const decimalsArr = [[18, 18], [10, 18], [18, 15]]// [[18, 18], [10, 18], [18, 15]]
 
 gridexTypes.forEach((gridexType, gridexTypeIndex) => {
   describe(`gridexLogic${gridexType} decimals:${decimalsArr[gridexTypeIndex]}`, function () {
@@ -22,7 +21,7 @@ gridexTypes.forEach((gridexType, gridexTypeIndex) => {
     let fee;
     let gridexUtil;
     let arbitrageUtil;
-    let testGridexUtil;
+    let sharesUtil;
 
 
     const { grid2price, price2grid } = getResult(gridexType)
@@ -51,7 +50,7 @@ gridexTypes.forEach((gridexType, gridexTypeIndex) => {
 
       gridexUtil = await (await ethers.getContractFactory(`GridexUtil`)).deploy();
       arbitrageUtil = await (await ethers.getContractFactory(`ArbitrageUtil`)).deploy(); //{ libraries: { GridexUtil: gridexUtil.address } }
-      testGridexUtil = await (await ethers.getContractFactory(`TestGridexUtil`)).deploy();
+      sharesUtil = await (await ethers.getContractFactory(`SharesUtil`)).deploy();
     })
 
     it("changeShares", async function () {
@@ -71,11 +70,7 @@ gridexTypes.forEach((gridexType, gridexTypeIndex) => {
             const stockBalance0 = await stock.balanceOf(gridexLogic.address);
             const moneyBalance0 = await money.balanceOf(owner.address);
             const pool = await gridexLogic.pools(grid);
-            let { deltaStock, deltaMoney } = await testGridexUtil.getDeltaForchangeShares(gridexLogic.address, grid, pool, sharesDeltaAndSoldRatios[index].toFixed(0))
-            if (sharesDelta.indexOf('-') === 0) {
-              deltaStock = deltaStock.mul(-1)
-              deltaMoney = deltaMoney.mul(-1)
-            }
+            let { leftStockDelta, gotMoneyDelta } = await sharesUtil.calcChangeShares(gridexLogic.address, grid, pool, sharesDeltaAndSoldRatios[index].toFixed(0))
             const promise = gridexLogic.changeShares(grid, sharesDeltaAndSoldRatios[index].toFixed(0))
             if (sharesDelta.indexOf('-') === 0) {
               await expect(promise).to.emit(gridexLogic, "TransferSingle").withArgs(owner.address, owner.address, "0x0000000000000000000000000000000000000000", grid, Math.abs(sharesDelta))
@@ -87,8 +82,8 @@ gridexTypes.forEach((gridexType, gridexTypeIndex) => {
             expect(changedPoolWithMyShare.myShares).to.equal(poolWithMyShare.myShares.add(sharesDelta))
             const stockBalance1 = await stock.balanceOf(gridexLogic.address);
             const moneyBalance1 = await money.balanceOf(owner.address);
-            expect(stockBalance1.sub(stockBalance0)).to.equal(deltaStock)
-            expect(moneyBalance0.sub(moneyBalance1)).to.equal(deltaMoney)
+            expect(stockBalance1.sub(stockBalance0)).to.equal(leftStockDelta)
+            expect(moneyBalance0.sub(moneyBalance1)).to.equal(gotMoneyDelta)
             const wordIdx = parseInt(grid / 256)
             const bitIdx = grid % 256
             const maskWords = await gridexLogic.getMaskWords()
@@ -109,33 +104,29 @@ gridexTypes.forEach((gridexType, gridexTypeIndex) => {
 
     const price = BigNumber(1700).multipliedBy(PriceBase) // 不考虑精度的price
     it("batchChangeShares", async function () {
-      const stockAmount = BigNumber("1000000000000")
+      const stockAmount = ethers.utils.parseUnits("1", 12)
       const minPrice = PriceBase.multipliedBy(1550)
       const maxPrice = PriceBase.multipliedBy(1800)
-      const { amount, sharesResult } = getPairTokenResult(params, gridexType, price, minPrice, maxPrice, stockAmount, 0)
-      const gridexLogicTemp = {
-        isContact: () => true,
-        getPools
-      }
-      const { sharesDeltaAndSoldRatios, beginGrid } = await getSharesDeltaAndSoldRatio(params, gridexLogicTemp, gridexType, price, sharesResult.beginGrid, sharesResult.stockIns.map(v => BigNumber(v)), sharesResult.moneyIns.map(v => BigNumber(v)))
-      const pools1 = await gridexLogicTemp.getPools(beginGrid, sharesDeltaAndSoldRatios.length)
-      await gridexLogic.batchChangeShares(beginGrid, sharesDeltaAndSoldRatios.map(v => v.toString()), stockAmount.multipliedBy(1.001).toFixed(0), BigNumber(amount).multipliedBy(1.001).toFixed(0))
-      const pools2 = await gridexLogicTemp.getPools(beginGrid, sharesDeltaAndSoldRatios.length)
+      let { deltaMoney, minGrid, sharesDeltas } = await sharesUtil.getSharesResult(gridexLogic.address, [minPrice.toFixed(0), price.toFixed(0), maxPrice.toFixed(0)], stockAmount)
+      minGrid = minGrid.toNumber()
+      const pools1 = await getPools(minGrid, sharesDeltas.length)
+      await gridexLogic.batchChangeShares(minGrid, sharesDeltas, stockAmount, deltaMoney)
+      const pools2 = await getPools(minGrid, sharesDeltas.length)
       pools2.forEach((pool, index) => {
-        const sharesDeltaAndSoldRatio = BigNumber(sharesDeltaAndSoldRatios[index].toString())
+        const sharesDeltaAndSoldRatio = BigNumber(sharesDeltas[index].toString())
         const soldRatio = sharesDeltaAndSoldRatio.mod(BigNumber(2).pow(64)).toFixed(0)
         const shareDelta = sharesDeltaAndSoldRatio.minus(soldRatio).dividedBy(BigNumber(2).pow(64)).toFixed(0)
         expect(pool.totalShares.toString()).to.equal(pools1[index].totalShares.add(shareDelta).toString())
         expect(pool.soldRatio.toString()).to.equal(soldRatio)
       })
 
-      await expect(gridexLogic.batchChangeShares(beginGrid, sharesDeltaAndSoldRatios.map(v => v.toString()), stockAmount.multipliedBy(1.001).toFixed(0), 0)).to.be.revertedWith("too-much-money-paid")
-      await expect(gridexLogic.batchChangeShares(beginGrid, sharesDeltaAndSoldRatios.map(v => v.toString()), 0, BigNumber(amount).multipliedBy(1.001).toFixed(0))).to.be.revertedWith("too-much-stock-paid")
+      await expect(gridexLogic.batchChangeShares(minGrid, sharesDeltas, stockAmount, 0)).to.be.revertedWith("too-much-money-paid")
+      await expect(gridexLogic.batchChangeShares(minGrid, sharesDeltas, 0, deltaMoney)).to.be.revertedWith("too-much-stock-paid")
     });
 
     it("initPool", async function () {
       const { prices, pools, grid } = await getGridexTradeResult(false, price);
-      await expect(gridexLogic.initPool(grid, 1, RatioBase.plus(100).toFixed(0))).to.be.revertedWith("invalid-ration")
+      await expect(gridexLogic.initPool(grid, 1, RatioBase.plus(100).toFixed(0))).to.be.revertedWith("invalid-ratio")
       await expect(gridexLogic.initPool(grid, 1, 0)).to.be.revertedWith("already created")
     })
 
@@ -146,10 +137,11 @@ gridexTypes.forEach((gridexType, gridexTypeIndex) => {
       for (let i = 0; i < changedGrids.length; i++) {
         const changedGrid = changedGrids[i];
         const pool = await gridexLogic.pools(changedGrid)
+
         if (pool.totalShares == 0) {
           await gridexLogic.changeShares(changedGrid, sharesDelta);
-        } else if (pool.totalShares.soldRatio == 0) {
-          await gridexLogic.buyFromPools(BigNumber(PriceBase).pow(2), 1000, changedGrid, changedGrid + 1)
+        } else if (pool.soldRatio.eq(0)) {
+          await gridexLogic.buyFromPools(ethers.utils.parseUnits("1", 50), 1000, changedGrid, changedGrid + 1)
         } else {
           await gridexLogic.sellToPools(0, 1000, changedGrid, changedGrid - 1)
         }
@@ -159,13 +151,12 @@ gridexTypes.forEach((gridexType, gridexTypeIndex) => {
         if (changedGrid === grid) {
           expect(result[3]).to.equal(0);
           expect(result[4]).to.equal(0);
-          continue;
         }
         await gridexLogic.arbitrage(result[0], result[1], result[2])
         const stockBalance1 = await stock.balanceOf(owner.address);
         const moneyBalance1 = await money.balanceOf(owner.address);
-        expect(moneyBalance1.sub(moneyBalance0)).to.equal(result[3])
-        expect(stockBalance1.sub(stockBalance0)).to.equal(result[4])
+        expect(stockBalance1.sub(stockBalance0)).to.equal(result[3])
+        expect(moneyBalance1.sub(moneyBalance0)).to.equal(result[4])
         for (let index = 0; index < result[2] - result[0] + 1; index++) {
           const grid = result[0].add(index)
           const pool = await gridexLogic.pools(grid)
@@ -188,20 +179,41 @@ gridexTypes.forEach((gridexType, gridexTypeIndex) => {
       await gridexLogic.changeShares(grid + 100, sharesDelta);
       await gridexLogic.changeShares(grid - 100, sharesDelta);
       const result = await arbitrageUtil.getArbitrageResult(gridexLogic.address, grid);
-      const stockAmount = BigNumber("100000")
+      const stockAmount = "100000"
       const minPrice = PriceBase.multipliedBy(1600)
       const maxPrice = PriceBase.multipliedBy(1800)
-      const { amount, sharesResult } = getPairTokenResult(params, gridexType, BigNumber(result[5].toString()), minPrice, maxPrice, stockAmount, 0)
-      const gridexLogicTemp = {
-        isContact: () => true,
-        getPools
-      }
-      const { sharesDeltaAndSoldRatios, beginGrid } = await getSharesDeltaAndSoldRatio(params, gridexLogicTemp, gridexType, price, sharesResult.beginGrid, sharesResult.stockIns.map(v => BigNumber(v)), sharesResult.moneyIns.map(v => BigNumber(v)))
-      await gridexLogic.arbitrageAndBatchChangeShares(result[0], result[1], result[2], beginGrid, sharesDeltaAndSoldRatios.map(v => v.toString()), stockAmount.multipliedBy(1.001).toFixed(0), BigNumber(amount).multipliedBy(1.001).toFixed(0))
+      let { deltaMoney, minGrid, sharesDeltas } = await sharesUtil.getSharesResult(gridexLogic.address, [minPrice.toFixed(0), price.toFixed(0), maxPrice.toFixed(0)], stockAmount)
+      minGrid = minGrid.toNumber()
+      await gridexLogic.arbitrageAndBatchChangeShares(result[0], result[1], result[2], minGrid, sharesDeltas, stockAmount, deltaMoney)
       // 移除掉方便后续测试，否则后面会测试不通过
       await gridexLogic.changeShares(grid + 100, BigNumber(-1000).times(BigNumber(2).pow(64)).toFixed(0));
       await gridexLogic.changeShares(grid - 100, BigNumber(-1000).times(BigNumber(2).pow(64)).toFixed(0));
     });
+
+    it("getBuyFromPoolsResultByMoney", async function () {
+      // const grid = 340; // 1000000000000000
+      // const prices = [grid2price(grid).toString(), grid2price(grid + 1).toString(), grid2price(grid + 2).toString()];
+      // const pools = [
+      //   { soldRatio: "6094053163952596968", totalShares: "1698328611860831913", totalStock: "1698328611860831913" },
+      //   { soldRatio: "0", totalShares: "331679063403329720", totalStock: "331679063403329720" }
+      // ]
+      const { prices, pools, grid } = await getGridexTradeResult(false, price); // 10 ** 16
+      const maxAmount = 2 * 10 ** 15
+      const amounts = new Array(20).fill(0).map((_, i) => Math.floor(maxAmount * (i + 1) / 20)).map(v => ethers.BigNumber.from(v.toString()).mul(params.priceMul).div(params.priceDiv))
+      const { totalPaidMoney } = await gridexUtil.getBuyFromPoolsResult(prices, pools, ethers.utils.parseUnits("1", 20), await gridexUtil.getFee_m_d(gridexLogic.address, fee))
+      for (const amount of amounts) {
+        const { totalGotStock, totalSoldStock } = await gridexUtil.getBuyFromPoolsResultByMoney(prices, pools, amount, await gridexUtil.getFee_m_d(gridexLogic.address, fee)) // debug 3000000 500000000000 1800000000000
+        // console.log("calc", totalGotStock, totalSoldStock);
+        const result = await gridexUtil.getBuyFromPoolsResult(prices, pools, totalSoldStock, await gridexUtil.getFee_m_d(gridexLogic.address, fee))
+        // console.log("true", result, amount,totalPaidMoney);
+        expect(result.totalGotStock).to.equal(totalGotStock)
+        if (totalPaidMoney.gte(amount)) {
+          expect(result.totalPaidMoney).to.above(amount.mul(1e3 - 1).div(1e3)).most(amount)
+        } else {
+          expect(result.totalPaidMoney).to.equal(totalPaidMoney)
+        }
+      }
+    })
 
     it("batchTrade", async function () {
       const stockBalance0 = await stock.balanceOf(owner.address);
@@ -212,7 +224,7 @@ gridexTypes.forEach((gridexType, gridexTypeIndex) => {
       const finalResult = await gridexUtil.getSellToPoolsResult(prices, pools, finalSellAmount, await gridexUtil.getFee_m_d(gridexLogic.address, 0))
       const buyArgs = amounts.map(amount => BigNumber(amount).times(BigNumber(2).pow(32)).plus(BigNumber(grid).times(BigNumber(2).pow(16))).plus(grid + 20)).map(v => v.toFixed(0))
       const sellArgs = amounts.reverse().concat(finalSellAmount).map(amount => BigNumber(amount).times(BigNumber(2).pow(32)).plus(BigNumber(grid).times(BigNumber(2).pow(16))).plus(grid - 20)).map(v => v.toFixed(0))
-      await gridexLogic.batchTrade(sellArgs, buyArgs, BigNumber(PriceBase).times(PriceBase).toFixed(0), 0);
+      await gridexLogic.batchTrade(sellArgs, buyArgs);
       const stockBalance1 = await stock.balanceOf(owner.address);
       const moneyBalance1 = await money.balanceOf(owner.address);
       const price0Mul = finalResult.totalGotMoney.mul(1000).div(finalResult.totalSoldStock)
@@ -223,19 +235,10 @@ gridexTypes.forEach((gridexType, gridexTypeIndex) => {
     });
 
     it("buyFromPools", async function () {
-      // --------------
-      // for (const amount of [10000, 10000000, 2000000000, "4000000000000", "50000000000000000"]) {
-      //   const { prices, pools, grid } = await getGridexTradeResult(false, price);
-      //   const r1 = await gridexUtil.getBuyFromPoolsResultByMoney(prices, pools, amount, fee) // debug 3000000 500000000000 1800000000000
-      //   console.log("calc", r1.totalGotStock, r1.totalPaidMoney);
-      //   const r2 = await gridexUtil.getBuyFromPoolsResult(prices, pools, r1.totalGotStock, fee)
-      //   console.log("true", r2.totalGotStock, r2.totalPaidMoney, amount);
-      // }
-      // --------------
       const { prices, pools, grid } = await getGridexTradeResult(false, price);
       await expect(gridexLogic.buyFromPools(0, 10000, grid, grid + 20)).to.be.revertedWith("price-too-high")
 
-      const stockToBuies = [3000000, 500000000000, "18000000000000"]
+      const stockToBuies = [3000000, 500000000000, "18000000000000"].map(v => ethers.BigNumber.from(v))
       for (let i = 0; i < stockToBuies.length; i++) {
         const stockToBuy = stockToBuies[i];
         const stockBalance0 = await stock.balanceOf(gridexLogic.address);
@@ -249,8 +252,11 @@ gridexTypes.forEach((gridexType, gridexTypeIndex) => {
         await gridexLogic.buyFromPools(BigNumber(PriceBase).times(PriceBase).toFixed(0), stockToBuy, grid, grid + pools.length)
         const stockBalance1 = await stock.balanceOf(gridexLogic.address);
         const moneyBalance1 = await money.balanceOf(owner.address);
-        expect(stockBalance0.sub(stockBalance1).toString()).to.equal(totalGotStock.toString())
-        expect(moneyBalance0.sub(moneyBalance1).toString()).to.equal(totalPaidMoney.toString())
+        expect(stockBalance0.sub(stockBalance1)).to.equal(totalGotStock)
+        expect(moneyBalance0.sub(moneyBalance1)).to.equal(totalPaidMoney)
+        if (i != stockToBuies.length - 1) {
+          expect(totalGotStock).to.above(stockToBuy.mul(1e2 - 1).div(1e2)).most(stockToBuy)
+        }
         if (i == stockToBuies.length - 1 && gridexType != 256) { // 最后一把买光了
           const s = await stock.balanceOf(gridexLogic.address)
           expect(s.toString()).to.equal("0")
@@ -262,7 +268,7 @@ gridexTypes.forEach((gridexType, gridexTypeIndex) => {
       const { prices, pools, grid } = await getGridexTradeResult(false, price);
       await expect(gridexLogic.sellToPools(ethers.utils.parseUnits("1", 50), 1000, grid, grid - 20)).to.be.revertedWith("price-too-low")
 
-      const stockToSells = [3000000, 500000000000, "18000000000000"]
+      const stockToSells = [3000000, 500000000000, "18000000000000"].map(v => ethers.BigNumber.from(v))
       for (let i = 0; i < stockToSells.length; i++) {
         const stockToSell = stockToSells[i];
         const stockBalance0 = await stock.balanceOf(gridexLogic.address);
@@ -276,8 +282,11 @@ gridexTypes.forEach((gridexType, gridexTypeIndex) => {
         await gridexLogic.sellToPools(0, stockToSell, grid, grid - pools.length)
         const stockBalance1 = await stock.balanceOf(gridexLogic.address);
         const moneyBalance1 = await money.balanceOf(owner.address);
-        expect(stockBalance1.sub(stockBalance0).toString()).to.equal(totalSoldStock.toString())
-        expect(moneyBalance1.sub(moneyBalance0).toString()).to.equal(totalGotMoney.toString())
+        expect(stockBalance1.sub(stockBalance0)).to.equal(totalSoldStock)
+        expect(moneyBalance1.sub(moneyBalance0)).to.equal(totalGotMoney)
+        if (i != stockToSells.length - 1) {
+          expect(totalSoldStock).to.above(stockToSell.mul(1e2 - 1).div(1e2)).most(stockToSell)
+        }
         if (i == stockToSells.length - 1 && gridexType != 256) { // 最后一把卖光了
           const m = await money.balanceOf(gridexLogic.address)
           expect(m.toString()).to.equal("0")
@@ -303,8 +312,8 @@ gridexTypes.forEach((gridexType, gridexTypeIndex) => {
       expect(moneyBalance).to.equal(0)
     });
 
-    async function getPools(minGrid, length) {
-      const grids = new Array(length).fill(0).map((_, i) => i + minGrid)
+    async function getPools(beginGrid, length) {
+      const grids = new Array(length).fill(0).map((_, i) => i + beginGrid)
       const pools = await Promise.all(grids.map(grid => gridexLogic.pools(grid)))
       return pools
     }

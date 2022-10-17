@@ -1,5 +1,6 @@
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+// SPDX-License-Identifier: BUSL-1.1
+pragma solidity 0.8.15;
+
 import "./Interface.sol";
 
 // import "hardhat/console.sol";
@@ -9,6 +10,7 @@ contract GridexUtil {
     uint256 constant PriceBase = 2**68;
     uint256 constant FeeBase = 10000;
     uint256 constant GridCount = 64 * 256;
+    uint256 constant LargeAmount = 1 << 95;
 
     function getBuyFromPoolsResult(
         uint256[] memory prices,
@@ -203,157 +205,100 @@ contract GridexUtil {
     function getBuyFromPoolsResultByMoney(
         uint256[] memory prices,
         IGridexInterface.Pool[] memory pools,
-        uint256 moneyToBuy,
+        uint256 moneyToPay,
         uint256 fee_m_d
-    ) public view returns (uint256 totalGotStock, uint256 totalPaidMoney) {
+    ) public pure returns (uint256 totalGotStock, uint256 totalSoldStock) {
         uint256 grid = 0;
-        uint256 priceHi = prices[grid] * uint64(fee_m_d >> 64); // (beginGrid + grid);
-        (totalGotStock, totalPaidMoney) = (0, 0);
-        for (; moneyToBuy != 0 && grid < pools.length; grid++) {
-            uint256 priceLo = priceHi;
-            priceHi = prices[grid + 1] * uint64(fee_m_d >> 64); //(beginGrid + grid + 1);
-            IGridexInterface.Pool memory pool = IGridexInterface.Pool({ // 需要是新的，原本的不能改
-                totalShares: pools[grid].totalShares,
-                totalStock: pools[grid].totalStock,
-                soldRatio: pools[grid].soldRatio
-            });
-            if (pool.totalStock == 0 || pool.soldRatio == RatioBase) {
-                // cannot deal
-                continue;
-            }
+        for (; moneyToPay != 0 && grid < pools.length; grid++) {
+            uint256[] memory currentGridPrices = new uint256[](2);
+            currentGridPrices[0] = prices[grid];
+            currentGridPrices[1] = prices[grid + 1];
+            IGridexInterface.Pool[]
+                memory currentGridPools = new IGridexInterface.Pool[](1);
+            currentGridPools[0] = pools[grid];
+            (
+                uint256 currentGridTotalPaidMoney,
+                uint256 currentGridTotalGotStock,
 
-            uint256 soldStockOld = (uint256(pool.totalStock) *
-                uint256(pool.soldRatio)) / RatioBase;
-            uint256 gotMoneyOld = (soldStockOld *
-                ((priceHi *
-                    pool.soldRatio +
-                    priceLo *
-                    (RatioBase - pool.soldRatio)) /
-                    RatioBase +
-                    priceLo)) / (2 * PriceBase * uint64(fee_m_d));
-            ////-------------------
-            // uint256 canGotMoney = (pool.totalStock * (priceHi + priceLo)) /
-            //     (2 * PriceBase) -
-            //     gotMoneyOld;
-
-            //--------------
-            uint256 canGotMoney;
-            {
-                uint256 price = (priceHi *
-                    pool.soldRatio +
-                    priceLo *
-                    (RatioBase - pool.soldRatio)) / RatioBase;
-                uint256 leftStockOld = uint256(pool.totalStock) - soldStockOld;
-                uint256 gotMoneyNew = gotMoneyOld +
-                    (((leftStockOld * (price + priceHi)) /
-                        (2 * PriceBase * uint64(fee_m_d))) *
-                        (FeeBase + (fee_m_d >> 128))) /
-                    FeeBase; //fee in money
-                uint256 totalStock = 1 + /*for rounding error*/
-                    (gotMoneyNew * 2 * PriceBase * uint64(fee_m_d)) /
-                    (priceHi + priceLo);
-                gotMoneyNew =
-                    (totalStock * (priceHi + priceLo)) /
-                    (2 * PriceBase * uint64(fee_m_d));
-                canGotMoney = gotMoneyNew - gotMoneyOld;
-            }
-            ////-------------------
-
-            if (moneyToBuy >= canGotMoney) {
-                uint256 leftStockOld = uint256(pool.totalStock) - soldStockOld;
-                moneyToBuy -= canGotMoney;
-                totalGotStock += leftStockOld;
-                totalPaidMoney += canGotMoney;
-                if (moneyToBuy == 0) {
+            ) = getBuyFromPoolsResult(
+                    currentGridPrices,
+                    currentGridPools,
+                    LargeAmount,
+                    fee_m_d
+                );
+            if (moneyToPay >= currentGridTotalPaidMoney) {
+                uint256 soldStockOld = (uint256(pools[grid].totalStock) *
+                    uint256(pools[grid].soldRatio)) / RatioBase;
+                uint256 leftStockOld = uint256(pools[grid].totalStock) -
+                    soldStockOld;
+                totalSoldStock += leftStockOld;
+                totalGotStock += currentGridTotalGotStock;
+                moneyToPay -= currentGridTotalPaidMoney;
+                if (moneyToPay == 0) {
                     break;
                 }
             } else {
-                uint256[2] memory prices = [priceLo, priceHi];
-                uint256 moneyToBuy1 = moneyToBuy;
-                uint256 fee1 = (fee_m_d >> 128);
-                uint256 totalGotStock1 = totalGotStock;
-                uint256 totalPaidMoney1 = totalPaidMoney;
-                (uint256 stock, uint256 money) = getBuyFromAPoolResultByMoney(
-                    prices,
-                    pool,
-                    moneyToBuy1,
-                    fee1
-                );
-                return (totalGotStock1 + stock, totalPaidMoney1 + money);
+                (
+                    uint256 gotStock,
+                    uint256 soldStock
+                ) = getBuyFromAPoolResultByMoney(
+                        currentGridPrices,
+                        currentGridPools,
+                        moneyToPay,
+                        fee_m_d,
+                        currentGridTotalPaidMoney
+                    );
+                return (totalGotStock + gotStock, totalSoldStock + soldStock);
             }
         }
     }
 
     function getBuyFromAPoolResultByMoney(
-        uint256[2] memory prices,
-        IGridexInterface.Pool memory pool,
-        uint256 moneyToBuy,
-        uint256 fee_m_d
-    ) private view returns (uint256 totalGotStock, uint256 totalPaidMoney) {
-        uint256 lastSoldRatio;
-        uint256 maxRetry = 5;
-        uint256 soldStockOld = (uint256(pool.totalStock) *
-            uint256(pool.soldRatio)) / RatioBase;
-        uint256 price = (prices[1] *
-            pool.soldRatio +
-            prices[0] *
-            (RatioBase - pool.soldRatio)) / RatioBase;
-        uint256 gotMoneyOld = (soldStockOld * (price + prices[0])) /
-            (2 * PriceBase * uint64(fee_m_d));
-        uint256 maxMoney = (((pool.totalStock * (prices[1] + prices[0])) /
-            (2 * PriceBase * uint64(fee_m_d))) * FeeBase) /
-            ((fee_m_d >> 128) + FeeBase); // priceHigh pricelow?
+        uint256[] memory prices,
+        IGridexInterface.Pool[] memory pools,
+        uint256 moneyToPay,
+        uint256 fee_m_d,
+        uint256 maxPaidMoney
+    ) private pure returns (uint256 totalGotStock, uint256 totalSoldStock) {
+        uint256 leftStockOld = uint256(pools[0].totalStock) -
+            (uint256(pools[0].totalStock) * uint256(pools[0].soldRatio)) /
+            RatioBase;
+        uint256 maxRetry = 10;
+        uint256 totalPaidMoney = moneyToPay;
+        totalSoldStock = (leftStockOld * moneyToPay) / maxPaidMoney;
+        uint256 preAddedStock;
         for (uint256 i = 0; i < maxRetry; i++) {
-            lastSoldRatio = pool.soldRatio;
-            pool.soldRatio = uint64(
-                lastSoldRatio +
-                    (((moneyToBuy - totalPaidMoney) * RatioBase) * prices[0]) /
-                    maxMoney /
-                    prices[1]
+            require(
+                moneyToPay >= totalPaidMoney,
+                "moneyToPay >= totalPaidMoney"
             );
-            price =
-                (prices[1] *
-                    pool.soldRatio +
-                    prices[0] *
-                    (RatioBase - pool.soldRatio)) /
-                RatioBase;
-
-            uint256 newSoldStockOld = (uint256(pool.totalStock) *
-                uint256(pool.soldRatio)) / RatioBase;
-            uint256[2] memory prices1 = prices;
-            price =
-                (prices1[1] *
-                    pool.soldRatio +
-                    prices1[0] *
-                    (RatioBase - pool.soldRatio)) /
-                RatioBase;
-            uint256 gotMoneyNew = (newSoldStockOld * (price + prices1[0])) /
-                (2 * PriceBase * uint64(fee_m_d));
-            totalPaidMoney = gotMoneyNew - gotMoneyOld;
-            if (moneyToBuy < totalPaidMoney) {
-                price =
-                    (prices1[1] *
-                        lastSoldRatio +
-                        prices1[0] *
-                        (RatioBase - lastSoldRatio)) /
-                    RatioBase;
-                IGridexInterface.Pool memory pool1 = pool;
-                newSoldStockOld =
-                    (uint256(pool1.totalStock) * uint256(lastSoldRatio)) /
-                    RatioBase;
-                gotMoneyNew =
-                    (newSoldStockOld * (price + prices1[0])) /
-                    (2 * PriceBase * uint64(fee_m_d));
-                totalPaidMoney = gotMoneyNew - gotMoneyOld;
-                return (newSoldStockOld - soldStockOld, totalPaidMoney);
+            uint256 addedStock = (leftStockOld *
+                (moneyToPay - totalPaidMoney) *
+                prices[0]) / (maxPaidMoney * prices[1]);
+            if (addedStock == 0) {
+                addedStock = preAddedStock;
+            } else {
+                preAddedStock = addedStock;
             }
-            if (moneyToBuy == totalPaidMoney || i == (maxRetry - 1)) {
-                return (newSoldStockOld - soldStockOld, totalPaidMoney);
+            uint256 gotStock;
+            uint256 stockToBuy = totalSoldStock + addedStock;
+            (totalPaidMoney, gotStock, ) = getBuyFromPoolsResult(
+                prices,
+                pools,
+                stockToBuy,
+                fee_m_d
+            );
+            if (totalPaidMoney > moneyToPay) {
+                return (totalGotStock, totalSoldStock);
+            } else if (totalPaidMoney == moneyToPay) {
+                return (gotStock, stockToBuy);
             }
+            totalGotStock = gotStock;
+            totalSoldStock = stockToBuy;
         }
     }
 
-    function getPrices(
+    function grids2prices(
         address gridexPair,
         uint256 beginGrid,
         uint256 length
@@ -419,6 +364,9 @@ contract GridexUtil {
             if (lowMaskIndex != GridCount && highMaskIndex != GridCount) {
                 break;
             }
+        }
+        if (lowMaskIndex == GridCount && highMaskIndex == GridCount) {
+            return (GridCount, GridCount);
         }
         for (uint256 i = 0; i < 256; i++) {
             if (

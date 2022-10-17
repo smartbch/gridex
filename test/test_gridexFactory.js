@@ -101,22 +101,11 @@ describe("GridexFactory", function () {
       }
       const { fee } = await gridexLogics[index].loadParams()
       expect(fee).to.equal(defaultFee[gridexTypes[index].toString()])
-      await gridexFactory.setFee(stock.address, money.address, gridexLogicImpl.address, 100)
+      await gridexFactory.setFee(stock.address, money.address, gridexLogicImpl.address, 1000)
       const p = await gridexLogics[index].loadParams()
-      expect(p.fee).to.equal(100)
+      expect(p.fee).to.equal(1000)
+      await expect(gridexFactory.setFee(stock.address, money.address, gridexLogicImpl.address, 1001)).to.be.revertedWith("too large")
       await expect(gridexLogics[index].setFee(100)).to.be.revertedWith("only factoryAddress")
-    }
-  })
-
-  it("setURL", async function () {
-    for (let index = 0; index < gridexLogicImpls.length; index++) {
-      let uri = await gridexLogics[index].uri(0)
-      expect(uri).to.equal("")
-      const gridexLogicImpl = gridexLogicImpls[index];
-      await gridexFactory.setURI(stock.address, money.address, gridexLogicImpl.address, "100")
-      uri = await gridexLogics[index].uri(0)
-      expect(uri).to.equal("100")
-      await expect(gridexLogics[index].setURI("100")).to.be.revertedWith("only factoryAddress")
     }
   })
 })

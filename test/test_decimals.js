@@ -2,15 +2,14 @@ const { expect } = require("chai");
 const { ethers } = require("hardhat");
 const BigNumber = require('bignumber.js')
 const { createERC20 } = require("./utils/util")
-const { getSharesDeltaAndSoldRatio, getPairTokenResult } = require("./utils/web_util")
 const { getResult } = require("./utils/price_util")
 
 const RatioBase = BigNumber(10 ** 19)
 const PriceBase = BigNumber(2 ** 68)
 const FeeBase = 10000;
 
-const gridexTypes = [16] // [16, 64, 256]
-const decimalsArr = [[10, 10], [10, 8], [8, 10]] // [[10, 10], [10, 8], [8, 10]]
+const gridexTypes = [16, 64, 256]// [16, 64, 256]
+const decimalsArr = [[10, 10], [10, 8], [8, 10]]  // [[10, 10], [10, 8], [8, 10]]
 
 decimalsArr.forEach((decimals) => {
   describe(`test_decimals: ${decimals}`, function () {
@@ -23,6 +22,7 @@ decimalsArr.forEach((decimals) => {
     let grid;
     let stockDecimal;
     let moneyDecimal;
+    let sharesUtil;
 
     const gridexType = gridexTypes[0]
     const { grid2price, price2grid } = getResult(gridexType)
@@ -50,23 +50,32 @@ decimalsArr.forEach((decimals) => {
       money.approve(gridexLogicAddress, MaxAmount)
 
       await getDeltaAmout()
+
+      sharesUtil = await (await ethers.getContractFactory(`SharesUtil`)).deploy();
     })
 
     it("batchChangeShares", async function () {
-      const price = BigNumber(1.02).multipliedBy(PriceBase) // 不考虑精度的price
+      const price = BigNumber(1.01).multipliedBy(PriceBase) // 不考虑精度的price
       grid = price2grid(price)
-      const stockAmount = BigNumber(10e13)
-      const minPrice = PriceBase.multipliedBy(0.9)
-      const maxPrice = PriceBase.multipliedBy(1.1)
-      const { amount, sharesResult } = getPairTokenResult(params, gridexType, price, minPrice, maxPrice, stockAmount, 0)
-      const gridexLogicTemp = {
-        isContact: () => false
+      const amount = ethers.utils.parseUnits("1", 14)
+      const amountsList = [[amount, 0], [amount, 0], [0, amount]]
+      const pricesList = [
+        [price.multipliedBy(0.9).toFixed(), price.toFixed(), price.multipliedBy(1.1).toFixed()],
+        [price.multipliedBy(1.1).toFixed(), price.toFixed(), price.multipliedBy(1.2).toFixed()],
+        [price.multipliedBy(0.8).toFixed(), price.toFixed(), price.multipliedBy(0.9).toFixed()]
+      ]
+      for (let i = 0; i < amountsList.length; i++) {
+        const amounts = amountsList[i];
+        const prices = pricesList[i];
+        let { deltaMoney, minGrid, sharesDeltas } = await sharesUtil.getSharesResult(gridexLogic.address, prices, amount)
+        await gridexLogic.batchChangeShares(minGrid, sharesDeltas, amounts[0], deltaMoney)
+        const { stockDetal, moneyDetal } = await getDeltaAmout()
+        expect(stockDetal.mul(-1)).to.equal(amounts[0])
+        expect(moneyDetal.mul(-1)).to.equal(deltaMoney)
+        if (amounts[1] > 0) {
+          expect(moneyDetal).to.below(amounts[1].mul(1000).div(997)).most(amounts[1])
+        }
       }
-      const { sharesDeltaAndSoldRatios, beginGrid } = await getSharesDeltaAndSoldRatio(params, gridexLogicTemp, gridexType, price, sharesResult.beginGrid, sharesResult.stockIns.map(v => BigNumber(v)), sharesResult.moneyIns.map(v => BigNumber(v)))
-      await gridexLogic.batchChangeShares(beginGrid, sharesDeltaAndSoldRatios.map(v => v.toString()), stockAmount.multipliedBy(1.001).toFixed(0), BigNumber(amount).multipliedBy(1.001).toFixed(0))
-      const { stockDetal, moneyDetal } = await getDeltaAmout()
-      expect(stockDetal.abs()).to.equal(stockAmount.minus(1).toFixed(0))
-      expect(moneyDetal.abs()).to.above(parseInt(amount * 0.9)).below(amount)
     });
 
     it("trade amount: 0", async function () {
@@ -86,21 +95,31 @@ decimalsArr.forEach((decimals) => {
     it("trade amount: 10", async function () {
       const amount = 10;
       if (stockDecimal > moneyDecimal) {
-        await expect(gridexLogic.sellToPools(0, amount, grid + 20, grid - 20)).to.be.revertedWith("Not equal 0")
-        await expect(gridexLogic.buyFromPools(PriceBase.multipliedBy(1.1).toFixed(0), amount, grid - 20, grid + 20)).to.be.revertedWith("Not equal 0")
+        {
+          await gridexLogic.sellToPools(0, amount, grid + 20, grid - 20)
+          const { stockDetal, moneyDetal } = await getDeltaAmout()
+          expect(stockDetal).to.equal(-10)
+          expect(moneyDetal).to.equal(0)
+        }
+        {
+          await gridexLogic.buyFromPools(PriceBase.multipliedBy(1.1).toFixed(0), amount, grid - 20, grid + 20)
+          const { stockDetal, moneyDetal } = await getDeltaAmout()
+          expect(stockDetal).to.equal(9)
+          expect(moneyDetal).to.equal(0)
+        }
         return
       }
       {
         await gridexLogic.sellToPools(0, amount, grid + 20, grid - 20)
         const { stockDetal, moneyDetal } = await getDeltaAmout()
-        expect(stockDetal.abs()).to.least(Math.floor(amount * (FeeBase - fee) / FeeBase)).most(amount)
-        expect(moneyDetal.mul(10 ** stockDecimal).mul(1000).div(stockDetal.abs()).div(10 ** moneyDecimal)).to.above(900).below(1100)
+        expect(stockDetal.mul(-1)).to.least(Math.floor(amount * (FeeBase - fee) / FeeBase)).most(amount)
+        expect(moneyDetal.mul(10 ** stockDecimal).mul(1000).div(stockDetal.mul(-1)).div(10 ** moneyDecimal)).to.above(900).below(1100)
       }
       {
         await gridexLogic.buyFromPools(PriceBase.multipliedBy(1.1).toFixed(0), amount, grid - 20, grid + 20)
         const { stockDetal, moneyDetal } = await getDeltaAmout()
-        expect(stockDetal.abs()).to.least(Math.floor(amount * (FeeBase - fee) / FeeBase)).most(amount)
-        expect(moneyDetal.abs().mul(10 ** stockDecimal).mul(1000).div(stockDetal).div(10 ** moneyDecimal)).to.above(900).below(1100)
+        expect(stockDetal).to.least(Math.floor(amount * (FeeBase - fee) / FeeBase)).most(amount)
+        expect(moneyDetal.mul(-1).mul(10 ** stockDecimal).mul(1000).div(stockDetal).div(10 ** moneyDecimal)).to.above(900).below(1100)
       }
     });
 
@@ -109,14 +128,14 @@ decimalsArr.forEach((decimals) => {
       {
         await gridexLogic.sellToPools(0, amount, grid + 20, grid - 20)
         const { stockDetal, moneyDetal } = await getDeltaAmout()
-        expect(stockDetal.abs()).to.least(Math.floor(amount * (FeeBase - fee) / FeeBase)).most(amount)
-        expect(moneyDetal.mul(10 ** stockDecimal).mul(1000).div(stockDetal.abs()).div(10 ** moneyDecimal)).to.above(900).below(1100)
+        expect(stockDetal.mul(-1)).to.least(Math.floor(amount * (FeeBase - fee) / FeeBase)).most(amount)
+        expect(moneyDetal.mul(10 ** stockDecimal).mul(1000).div(stockDetal.mul(-1)).div(10 ** moneyDecimal)).to.above(900).below(1100)
       }
       {
         await gridexLogic.buyFromPools(PriceBase.multipliedBy(1.1).toFixed(0), amount, grid - 20, grid + 20)
         const { stockDetal, moneyDetal } = await getDeltaAmout()
-        expect(stockDetal.abs()).to.least(Math.floor(amount * (FeeBase - fee) / FeeBase)).most(amount)
-        expect(moneyDetal.abs().mul(10 ** stockDecimal).mul(1000).div(stockDetal).div(10 ** moneyDecimal)).to.above(900).below(1100)
+        expect(stockDetal).to.least(Math.floor(amount * (FeeBase - fee) / FeeBase)).most(amount)
+        expect(moneyDetal.mul(-1).mul(10 ** stockDecimal).mul(1000).div(stockDetal).div(10 ** moneyDecimal)).to.above(900).below(1100)
       }
     });
 
@@ -125,30 +144,30 @@ decimalsArr.forEach((decimals) => {
       {
         await gridexLogic.sellToPools(0, amount, grid + 20, grid - 20)
         const { stockDetal, moneyDetal } = await getDeltaAmout()
-        expect(stockDetal.abs()).to.least(Math.floor(amount * (FeeBase - fee) / FeeBase) - 1).most(amount)
-        expect(moneyDetal.mul(10 ** stockDecimal).mul(1000).div(stockDetal.abs()).div(10 ** moneyDecimal)).to.above(900).below(1100)
+        expect(stockDetal.mul(-1)).to.least(Math.floor(amount * (FeeBase - fee) / FeeBase) - 1).most(amount)
+        expect(moneyDetal.mul(10 ** stockDecimal).mul(1000).div(stockDetal.mul(-1)).div(10 ** moneyDecimal)).to.above(900).below(1100)
       }
       {
         await gridexLogic.buyFromPools(PriceBase.multipliedBy(1.1).toFixed(0), amount, grid - 20, grid + 20)
         const { stockDetal, moneyDetal } = await getDeltaAmout()
-        expect(stockDetal.abs()).to.least(Math.floor(amount * (FeeBase - fee) / FeeBase) - 1).most(amount)
-        expect(moneyDetal.abs().mul(10 ** stockDecimal).mul(1000).div(stockDetal).div(10 ** moneyDecimal)).to.above(900).below(1100)
+        expect(stockDetal).to.least(Math.floor(amount * (FeeBase - fee) / FeeBase) - 1).most(amount)
+        expect(moneyDetal.mul(-1).mul(10 ** stockDecimal).mul(1000).div(stockDetal).div(10 ** moneyDecimal)).to.above(900).below(1100)
       }
     });
 
-    it("trade amount: 5*10e12", async function () {
-      const amount = 5 * 10e12
+    it("trade amount: 5*1e13", async function () {
+      const amount = 5 * 1e13
       {
         await gridexLogic.sellToPools(0, amount, grid + 20, grid - 20)
         const { stockDetal, moneyDetal } = await getDeltaAmout()
-        expect(stockDetal.abs()).to.least(Math.floor(amount * (FeeBase - fee) / FeeBase) - 1).most(amount)
-        expect(moneyDetal.mul(10 ** stockDecimal).mul(1000).div(stockDetal.abs()).div(10 ** moneyDecimal)).to.above(900).below(1100)
+        expect(stockDetal.mul(-1)).to.least(Math.floor(amount * (FeeBase - fee) / FeeBase) - 1).most(amount)
+        expect(moneyDetal.mul(10 ** stockDecimal).mul(1000).div(stockDetal.mul(-1)).div(10 ** moneyDecimal)).to.above(900).below(1100)
       }
       {
         await gridexLogic.buyFromPools(PriceBase.multipliedBy(1.1).toFixed(0), amount, grid - 20, grid + 20)
         const { stockDetal, moneyDetal } = await getDeltaAmout()
-        expect(stockDetal.abs()).to.least(Math.floor(amount * (FeeBase - fee) / FeeBase) - 1).most(amount)
-        expect(moneyDetal.abs().mul(10 ** stockDecimal).mul(1000).div(stockDetal).div(10 ** moneyDecimal)).to.above(900).below(1100)
+        expect(stockDetal).to.least(Math.floor(amount * (FeeBase - fee) / FeeBase) - 1).most(amount)
+        expect(moneyDetal.mul(-1).mul(10 ** stockDecimal).mul(1000).div(stockDetal).div(10 ** moneyDecimal)).to.above(900).below(1100)
       }
     });
 

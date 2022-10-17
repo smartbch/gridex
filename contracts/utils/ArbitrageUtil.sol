@@ -1,10 +1,11 @@
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+// SPDX-License-Identifier: BUSL-1.1
+pragma solidity 0.8.15;
+
 import "./GridexUtil.sol";
 
 // import "hardhat/console.sol";
 
-contract ArbitrageUtil is GridexUtil{
+contract ArbitrageUtil is GridexUtil {
     function _buyFromPools(
         address gridexPair,
         uint256 stockToBuy,
@@ -23,12 +24,12 @@ contract ArbitrageUtil is GridexUtil{
         bool isSell = false;
         uint256 length = stopGrid - grid;
         uint256 beginGrid = isSell ? (grid - length + 1) : grid;
-        IGridexInterface.Pool[] memory pools = GridexUtil.getPools(
+        IGridexInterface.Pool[] memory pools = getPools(
             gridexPair,
             beginGrid,
             length
         );
-        uint256[] memory prices = GridexUtil.getPrices(
+        uint256[] memory prices = grids2prices(
             gridexPair,
             beginGrid,
             length + 1
@@ -55,12 +56,12 @@ contract ArbitrageUtil is GridexUtil{
         bool isSell = true;
         uint256 length = grid - stopGrid;
         uint256 beginGrid = isSell ? (grid - length + 1) : grid;
-        IGridexInterface.Pool[] memory pools = GridexUtil.getPools(
+        IGridexInterface.Pool[] memory pools = getPools(
             gridexPair,
             beginGrid,
             length
         );
-        uint256[] memory prices = GridexUtil.getPrices(
+        uint256[] memory prices = grids2prices(
             gridexPair,
             beginGrid,
             length + 1
@@ -76,10 +77,10 @@ contract ArbitrageUtil is GridexUtil{
             int256[6] memory result // lowGrid midGrid  highGrid totalGotStock totalGotMoney arbitragedPrice
         )
     {
-        (uint256 lowGrid, uint256 highGrid) = GridexUtil.getLowGridAndHighGrid(
-            pairAddr
-        );
-        if (lowGrid == highGrid) {
+        (uint256 lowGrid, uint256 highGrid) = getLowGridAndHighGrid(pairAddr);
+        result[0] = int256(lowGrid);
+        result[2] = int256(highGrid);
+        if (result[0] == result[2]) {
             return result;
         }
         // uint256 maxLength = highGrid - lowGrid + 1;
@@ -111,8 +112,6 @@ contract ArbitrageUtil is GridexUtil{
         //     // pools正常
         //     return result;
         // }
-        result[0] = int256(lowGrid);
-        result[2] = int256(highGrid);
         int256 length = int256(result[2]) - int256(result[0]) + 1;
         int256 left = int256(grid);
         int256 right = int256(grid);
@@ -137,22 +136,35 @@ contract ArbitrageUtil is GridexUtil{
                 uint256(result[1]),
                 uint256(result[2])
             );
+            uint256 price = getPrice(
+                IGridexPair(pairAddr).grid2price(uint256(result[1])),
+                IGridexPair(pairAddr).grid2price(uint256(result[1]) + 1),
+                uint256(result[2])
+            );
+            IGridexInterface.Params memory p = IGridexPair(pairAddr).loadParams();
             if (curResult[0] >= 0 && curResult[1] >= 0) {
+                flag = true;
+            } else if (curResult[0] > 0 && curResult[1] < 0) {
+                uint256 dealPrice = (uint256(-curResult[1]) * p.priceMul) /
+                    (uint256(curResult[0]) * p.priceDiv);
+                if (dealPrice > price) {
+                    flag = true;
+                }
+            } else if (curResult[0] < 0 && curResult[1] > 0) {
+                uint256 dealPrice = (uint256(curResult[1]) * p.priceDiv) /
+                    (uint256(-curResult[0]) * p.priceDiv);
+                if (dealPrice < price) {
+                    flag = true;
+                }
+            }
+            if (flag) {
                 result[3] = curResult[0];
                 result[4] = curResult[1];
-                result[5] = curResult[2];
-                flag = true;
+                result[5] = int256(price);
                 break;
             }
         }
         require(flag, "getArbitrageResult: no best grid");
-        result[5] = int256(
-            GridexUtil.getPrice(
-                IGridexPair(pairAddr).grid2price(uint256(result[1])),
-                IGridexPair(pairAddr).grid2price(uint256(result[1]) + 1),
-                uint64(uint256(result[5]))
-            )
-        );
     }
 
     function getArbitrageSingleResult(
@@ -193,10 +205,7 @@ contract ArbitrageUtil is GridexUtil{
             uint256 midGrid_ = midGrid;
             (uint256 m, uint256 s, uint64 lastSoldRatio) = _buyFromPools(
                 pairAddr_,
-                IGridexPair(pairAddr_).getMinAmount(
-                    soldStock - gotStock,
-                    IGridexPair(pairAddr_).pools(midGrid_).totalStock
-                ),
+                soldStock - gotStock,
                 midGrid_,
                 midGrid_ + 1,
                 fee_m_d
@@ -219,8 +228,8 @@ contract ArbitrageUtil is GridexUtil{
             soldStock += s;
             result[2] = int256(uint256(lastSoldRatio));
         }
-        result[0] = int256(gotMoney) - int256(paidMoney);
-        result[1] = int256(gotStock) - int256(soldStock);
+        result[0] = int256(gotStock) - int256(soldStock);
+        result[1] = int256(gotMoney) - int256(paidMoney);
         if (result[0] == 0 && result[1] == 0) {
             result[2] = int256(
                 uint256(IGridexPair(pairAddr).pools(midGrid).soldRatio)
