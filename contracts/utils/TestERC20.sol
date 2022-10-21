@@ -3,8 +3,7 @@ pragma solidity 0.8.15;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-import "hardhat/console.sol";
-import "./Interface.sol";
+// import "hardhat/console.sol";
 
 contract TestERC20 is ERC20 {
     uint8 private _decimals;

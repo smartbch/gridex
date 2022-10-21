@@ -67,13 +67,17 @@ decimalsArr.forEach((decimals) => {
       for (let i = 0; i < amountsList.length; i++) {
         const amounts = amountsList[i];
         const prices = pricesList[i];
-        let { deltaMoney, minGrid, sharesDeltas } = await sharesUtil.getSharesResult(gridexLogic.address, prices, amount)
+        let { deltaMoney, minGrid, sharesDeltas } = await sharesUtil.getSharesResult(gridexLogic.address, await gridexLogic.loadParams(), prices, amount)
         await gridexLogic.batchChangeShares(minGrid, sharesDeltas, amounts[0], deltaMoney)
         const { stockDetal, moneyDetal } = await getDeltaAmout()
-        expect(stockDetal.mul(-1)).to.equal(amounts[0])
         expect(moneyDetal.mul(-1)).to.equal(deltaMoney)
-        if (amounts[1] > 0) {
-          expect(moneyDetal).to.below(amounts[1].mul(1000).div(997)).most(amounts[1])
+        if (amounts[0] == 0) {
+          expect(stockDetal).to.equal(0)
+        } else {
+          expect(stockDetal.mul(-1)).to.below(amounts[0].mul(1000).div(997)).most(amounts[0])
+        }
+        if (amounts[1] != 0) { //只有money
+          expect(moneyDetal.mul(-1)).to.below(amounts[1].mul(1000).div(997)).most(amounts[1])
         }
       }
     });

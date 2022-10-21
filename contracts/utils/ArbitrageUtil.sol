@@ -183,14 +183,14 @@ contract ArbitrageUtil is GridexUtil {
             IGridexPair(pairAddr).loadParams().priceDiv;
         (uint256 paidMoney, uint256 gotStock, ) = _buyFromPools(
             pairAddr,
-            1 << 95,
+            LargeAmount,
             lowGrid,
             midGrid,
             fee_m_d
         );
         (uint256 gotMoney, uint256 soldStock, ) = _sellToPools(
             pairAddr,
-            1 << 95,
+            LargeAmount,
             highGrid,
             midGrid,
             fee_m_d
