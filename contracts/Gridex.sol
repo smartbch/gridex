@@ -86,6 +86,9 @@ abstract contract GridexLogicAbstract is GridexLogicBase, ERC1155(""){
 	Pool[GridCount] public pools;
 	uint[MaskWordCount] internal maskWords;
 
+	event Buy(address operator, uint totalPaidMoney, uint totalGotStock);
+	event Sell(address operator, uint totalGotMoney, uint totalSoldStock);
+
 	function grid2price(uint grid) public pure virtual returns (uint);
 	function price2Grid(uint price) pure external virtual returns (uint);
 	function getMaskWords() view external virtual returns (uint[] memory masks);
@@ -316,6 +319,7 @@ abstract contract GridexLogicAbstract is GridexLogicBase, ERC1155(""){
 			}
 			pools[grid] = pool;
 		}
+		emit Buy(msg.sender, totalPaidMoney, totalGotStock);
 	}
 
 	function sellToPools(uint minAveragePrice, uint stockToSell, uint grid, uint stopGrid) external payable 
@@ -362,6 +366,7 @@ abstract contract GridexLogicAbstract is GridexLogicBase, ERC1155(""){
 			}
 			pools[grid] = pool;
 		}
+		emit Sell(msg.sender, totalGotMoney, totalSoldStock);
 	}
 
 	function arbitrage(uint lowGrid, uint midGrid, uint highGrid) public 

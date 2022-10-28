@@ -224,7 +224,8 @@ gridexTypes.forEach((gridexType, gridexTypeIndex) => {
         expect(totalPaidMoney.mul(FeeBase * 10).mul(FeeBase * 10).div(totalGotStock).div(noFeeResult.totalPaidMoney.mul(FeeBase * 10).div(noFeeResult.totalGotStock))).to.be.above(FeeBase * 10 + (0.9 * fee) * 10).most(FeeBase * 10 + (1.1 * fee) * 10)
         const dealPrice = PriceBase.multipliedBy(noFeeResult.totalPaidMoney.toString()).dividedBy(noFeeResult.totalGotStock.toString()).dividedBy(params.priceMul).multipliedBy(params.priceDiv)
         expect(dealPrice.toNumber()).to.be.least(grid2price(grid)).below(grid2price(grid + pools.length))
-        await gridexLogic.buyFromPools(BigNumber(PriceBase).times(PriceBase).toFixed(0), stockToBuy, grid, grid + pools.length)
+        await expect(gridexLogic.buyFromPools(BigNumber(PriceBase).times(PriceBase).toFixed(0), stockToBuy, grid, grid + pools.length))
+          .to.emit(gridexLogic, "Buy").withArgs(owner.address, totalPaidMoney, totalGotStock)
         const stockBalance1 = await stock.balanceOf(gridexLogic.address);
         const moneyBalance1 = await money.balanceOf(owner.address);
         expect(stockBalance0.sub(stockBalance1)).to.equal(totalGotStock)
@@ -254,7 +255,8 @@ gridexTypes.forEach((gridexType, gridexTypeIndex) => {
         expect(noFeeResult.totalGotMoney.mul(FeeBase * 10).mul(FeeBase * 10).div(noFeeResult.totalSoldStock).div(totalGotMoney.mul(FeeBase * 10).div(totalSoldStock))).to.be.above(FeeBase * 10 + (0.9 * fee) * 10).most(FeeBase * 10 + (1.1 * fee) * 10)
         const dealPrice = PriceBase.multipliedBy(noFeeResult.totalGotMoney.toString()).dividedBy(noFeeResult.totalSoldStock.toString()).dividedBy(params.priceMul).multipliedBy(params.priceDiv)
         expect(dealPrice.toNumber()).to.be.most(grid2price(grid + 1)).above(grid2price(grid - pools.length))
-        await gridexLogic.sellToPools(0, stockToSell, grid, grid - pools.length)
+        await expect(gridexLogic.sellToPools(0, stockToSell, grid, grid - pools.length))
+          .to.emit(gridexLogic, "Sell").withArgs(owner.address, totalGotMoney, totalSoldStock)
         const stockBalance1 = await stock.balanceOf(gridexLogic.address);
         const moneyBalance1 = await money.balanceOf(owner.address);
         expect(stockBalance1.sub(stockBalance0)).to.equal(totalSoldStock)
