@@ -86,8 +86,8 @@ abstract contract GridexLogicAbstract is GridexLogicBase, ERC1155(""){
 	Pool[GridCount] public pools;
 	uint[MaskWordCount] internal maskWords;
 
-	event Buy(address operator, uint totalPaidMoney, uint totalGotStock);
-	event Sell(address operator, uint totalGotMoney, uint totalSoldStock);
+	event Buy(address indexed operator, uint totalPaidMoney, uint totalGotStock);
+	event Sell(address indexed operator, uint totalGotMoney, uint totalSoldStock);
 
 	function grid2price(uint grid) public pure virtual returns (uint);
 	function price2Grid(uint price) pure external virtual returns (uint);
