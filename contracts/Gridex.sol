@@ -86,8 +86,8 @@ abstract contract GridexLogicAbstract is GridexLogicBase, ERC1155(""){
 	Pool[GridCount] public pools;
 	uint[MaskWordCount] internal maskWords;
 
-	event Buy(address indexed operator, uint totalPaidMoney, uint totalGotStock);
-	event Sell(address indexed operator, uint totalGotMoney, uint totalSoldStock);
+	event Buy(address indexed operator, uint grid, uint totalPaidMoney, uint totalGotStock);
+	event Sell(address indexed operator, uint grid, uint totalGotMoney, uint totalSoldStock);
 
 	function grid2price(uint grid) public pure virtual returns (uint);
 	function price2Grid(uint price) pure external virtual returns (uint);
@@ -305,7 +305,9 @@ abstract contract GridexLogicAbstract is GridexLogicBase, ERC1155(""){
 				stockToBuy -= leftStockOld;
 				totalGotStock += leftStockOld;
 				totalPaidMoney += gotMoneyNew-gotMoneyOld;
+				emit Buy(msg.sender, grid, gotMoneyNew-gotMoneyOld, leftStockOld);
 			} else { // cannot buy all in pool
+				{
 				uint stockFee = stockToBuy*(fee_m_d>>128)/FeeBase; //fee in stock
 				pool.totalStock += uint96(stockFee);
 				uint soldStockNew = soldStockOld+stockToBuy;
@@ -313,13 +315,16 @@ abstract contract GridexLogicAbstract is GridexLogicBase, ERC1155(""){
 				uint leftStockNew; // ≈ totalStockOld+stockFee-soldStockOld-stockToBuy
 				uint gotMoneyNew;
 				(leftStockNew, soldStockNew, gotMoneyNew) = calcPool(uint64(fee_m_d), priceLo, priceHi, pool.totalStock, pool.soldRatio);
-				totalGotStock += leftStockOld-leftStockNew; //≈ stockToBuy-stockFee
-				totalPaidMoney += gotMoneyNew-gotMoneyOld;
+				leftStockOld -= leftStockNew; //≈ stockToBuy-stockFee
+				totalGotStock += leftStockOld;
+				gotMoneyOld = gotMoneyNew - gotMoneyOld;
+				totalPaidMoney += gotMoneyOld;
 				stockToBuy = 0;
+				}
+				emit Buy(msg.sender, grid, gotMoneyOld, leftStockOld);
 			}
 			pools[grid] = pool;
 		}
-		emit Buy(msg.sender, totalPaidMoney, totalGotStock);
 	}
 
 	function sellToPools(uint minAveragePrice, uint stockToSell, uint grid, uint stopGrid) external payable 
@@ -352,6 +357,7 @@ abstract contract GridexLogicAbstract is GridexLogicBase, ERC1155(""){
 				stockToSell -= soldStockOldAndFee;
 				totalSoldStock += soldStockOldAndFee;
 				totalGotMoney += gotMoneyOld;
+				emit Sell(msg.sender, grid, gotMoneyOld, soldStockOldAndFee);
 			} else { // cannot get all money all in pool
 				stockFee = stockToSell*(fee_m_d>>128)/FeeBase;
 				pool.totalStock += uint96(stockFee); // fee in stock
@@ -359,14 +365,16 @@ abstract contract GridexLogicAbstract is GridexLogicBase, ERC1155(""){
 				uint soldStockNew = soldStockOld+stockFee-stockToSell;
 				pool.soldRatio = uint64(1/*for rounding error*/+RatioBase*soldStockNew/pool.totalStock);
 				(uint leftStockNew,, uint gotMoneyNew) = calcPool(uint64(fee_m_d), priceLo, priceHi, pool.totalStock, pool.soldRatio);
-				totalSoldStock += leftStockNew-leftStockOld; //≈ stockToSell
-				totalGotMoney += gotMoneyOld-gotMoneyNew;
+				leftStockOld = leftStockNew-leftStockOld; //≈ stockToSell
+				totalSoldStock += leftStockOld; 
+				gotMoneyOld -= gotMoneyNew;
+				totalGotMoney += gotMoneyOld;
 				}
+				emit Sell(msg.sender, grid, gotMoneyOld, leftStockOld);
 				stockToSell = 0;
 			}
 			pools[grid] = pool;
 		}
-		emit Sell(msg.sender, totalGotMoney, totalSoldStock);
 	}
 
 	function arbitrage(uint lowGrid, uint midGrid, uint highGrid) public 
