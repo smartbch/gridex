@@ -224,8 +224,20 @@ gridexTypes.forEach((gridexType, gridexTypeIndex) => {
         expect(totalPaidMoney.mul(FeeBase * 10).mul(FeeBase * 10).div(totalGotStock).div(noFeeResult.totalPaidMoney.mul(FeeBase * 10).div(noFeeResult.totalGotStock))).to.be.above(FeeBase * 10 + (0.9 * fee) * 10).most(FeeBase * 10 + (1.1 * fee) * 10)
         const dealPrice = PriceBase.multipliedBy(noFeeResult.totalPaidMoney.toString()).dividedBy(noFeeResult.totalGotStock.toString()).dividedBy(params.priceMul).multipliedBy(params.priceDiv)
         expect(dealPrice.toNumber()).to.be.least(grid2price(grid)).below(grid2price(grid + pools.length))
-        await expect(gridexLogic.buyFromPools(BigNumber(PriceBase).times(PriceBase).toFixed(0), stockToBuy, grid, grid + pools.length))
-          .to.emit(gridexLogic, "Buy").withArgs(owner.address, totalPaidMoney, totalGotStock)
+        const tx = await gridexLogic.buyFromPools(BigNumber(PriceBase).times(PriceBase).toFixed(0), stockToBuy, grid, grid + pools.length)
+        let { events } = await tx.wait()
+        events = events.splice(0, events.length - 3)
+        let totalGotStockByEvent = ethers.BigNumber.from(0)
+        let totalPaidMoneyByEvent = ethers.BigNumber.from(0)
+        for (let { args } of events) {
+          const { grid: eventGrid, operator, gotStock, paidMoney } = args
+          expect(operator).to.equal(owner.address)
+          expect(eventGrid).to.gte(grid).lte(grid+pools.length)
+          totalGotStockByEvent = totalGotStockByEvent.add(gotStock)
+          totalPaidMoneyByEvent = totalPaidMoneyByEvent.add(paidMoney)
+        }
+        expect(totalGotStockByEvent).to.equal(totalGotStock)
+        expect(totalPaidMoneyByEvent).to.equal(totalPaidMoney)
         const stockBalance1 = await stock.balanceOf(gridexLogic.address);
         const moneyBalance1 = await money.balanceOf(owner.address);
         expect(stockBalance0.sub(stockBalance1)).to.equal(totalGotStock)
@@ -255,8 +267,21 @@ gridexTypes.forEach((gridexType, gridexTypeIndex) => {
         expect(noFeeResult.totalGotMoney.mul(FeeBase * 10).mul(FeeBase * 10).div(noFeeResult.totalSoldStock).div(totalGotMoney.mul(FeeBase * 10).div(totalSoldStock))).to.be.above(FeeBase * 10 + (0.9 * fee) * 10).most(FeeBase * 10 + (1.1 * fee) * 10)
         const dealPrice = PriceBase.multipliedBy(noFeeResult.totalGotMoney.toString()).dividedBy(noFeeResult.totalSoldStock.toString()).dividedBy(params.priceMul).multipliedBy(params.priceDiv)
         expect(dealPrice.toNumber()).to.be.most(grid2price(grid + 1)).above(grid2price(grid - pools.length))
-        await expect(gridexLogic.sellToPools(0, stockToSell, grid, grid - pools.length))
-          .to.emit(gridexLogic, "Sell").withArgs(owner.address, totalGotMoney, totalSoldStock)
+
+        const tx = await (gridexLogic.sellToPools(0, stockToSell, grid, grid - pools.length))
+        let { events } = await tx.wait()
+        events = events.splice(0, events.length - 3)
+        let totalGotMoneyByEvent = ethers.BigNumber.from(0)
+        let totalSoldStockByEvent = ethers.BigNumber.from(0)
+        for (let { args } of events) {
+          const { grid: eventGrid, operator, gotMoney, soldStock } = args
+          expect(operator).to.equal(owner.address)
+          expect(eventGrid).to.gte(grid -pools.length).lte(grid)
+          totalGotMoneyByEvent = totalGotMoneyByEvent.add(gotMoney)
+          totalSoldStockByEvent = totalSoldStockByEvent.add(soldStock)
+        }
+        expect(totalGotMoneyByEvent).to.equal(totalGotMoney)
+        expect(totalSoldStockByEvent).to.equal(totalSoldStock)
         const stockBalance1 = await stock.balanceOf(gridexLogic.address);
         const moneyBalance1 = await money.balanceOf(owner.address);
         expect(stockBalance1.sub(stockBalance0)).to.equal(totalSoldStock)

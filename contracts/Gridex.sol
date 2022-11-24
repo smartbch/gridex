@@ -86,8 +86,8 @@ abstract contract GridexLogicAbstract is GridexLogicBase, ERC1155(""){
 	Pool[GridCount] public pools;
 	uint[MaskWordCount] internal maskWords;
 
-	event Buy(address indexed operator, uint grid, uint totalPaidMoney, uint totalGotStock);
-	event Sell(address indexed operator, uint grid, uint totalGotMoney, uint totalSoldStock);
+	event Buy(address indexed operator, uint grid, uint paidMoney, uint gotStock);
+	event Sell(address indexed operator, uint grid, uint gotMoney, uint soldStock);
 
 	function grid2price(uint grid) public pure virtual returns (uint);
 	function price2Grid(uint price) pure external virtual returns (uint);
@@ -304,8 +304,9 @@ abstract contract GridexLogicAbstract is GridexLogicBase, ERC1155(""){
 				(,, gotMoneyNew) = calcPool(uint64(fee_m_d), priceLo, priceHi, pool.totalStock, pool.soldRatio);
 				stockToBuy -= leftStockOld;
 				totalGotStock += leftStockOld;
-				totalPaidMoney += gotMoneyNew-gotMoneyOld;
-				emit Buy(msg.sender, grid, gotMoneyNew-gotMoneyOld, leftStockOld);
+				gotMoneyOld = gotMoneyNew-gotMoneyOld;
+				totalPaidMoney += gotMoneyOld;
+				emit Buy(msg.sender, grid, gotMoneyOld, leftStockOld);
 			} else { // cannot buy all in pool
 				{
 				uint stockFee = stockToBuy*(fee_m_d>>128)/FeeBase; //fee in stock
