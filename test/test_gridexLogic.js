@@ -229,10 +229,11 @@ gridexTypes.forEach((gridexType, gridexTypeIndex) => {
         events = events.splice(0, events.length - 3)
         let totalGotStockByEvent = ethers.BigNumber.from(0)
         let totalPaidMoneyByEvent = ethers.BigNumber.from(0)
-        for (let { args } of events) {
+        for (const { args, event } of events) {
+          expect(event).to.equal("Buy")
           const { grid: eventGrid, operator, gotStock, paidMoney } = args
           expect(operator).to.equal(owner.address)
-          expect(eventGrid).to.gte(grid).lte(grid+pools.length)
+          expect(eventGrid).to.gte(grid).lte(grid + pools.length)
           totalGotStockByEvent = totalGotStockByEvent.add(gotStock)
           totalPaidMoneyByEvent = totalPaidMoneyByEvent.add(paidMoney)
         }
@@ -273,10 +274,12 @@ gridexTypes.forEach((gridexType, gridexTypeIndex) => {
         events = events.splice(0, events.length - 3)
         let totalGotMoneyByEvent = ethers.BigNumber.from(0)
         let totalSoldStockByEvent = ethers.BigNumber.from(0)
-        for (let { args } of events) {
+        for (const { args, event } of events) {
+          expect(event).to.equal("Sell")
           const { grid: eventGrid, operator, gotMoney, soldStock } = args
           expect(operator).to.equal(owner.address)
-          expect(eventGrid).to.gte(grid -pools.length).lte(grid)
+          expect(operator).to.equal(owner.address)
+          expect(eventGrid).to.gte(grid - pools.length).lte(grid)
           totalGotMoneyByEvent = totalGotMoneyByEvent.add(gotMoney)
           totalSoldStockByEvent = totalSoldStockByEvent.add(soldStock)
         }
