@@ -8,7 +8,7 @@ const RatioBase = BigNumber(10 ** 19)
 const PriceBase = BigNumber(2 ** 68)
 const FeeBase = 10000;
 
-const gridexTypes = [16, 64, 256] // [16, 64, 256]
+const gridexTypes = [16, 64, 256]// [16, 64, 256]
 const decimalsArr = [[18, 18], [10, 18], [18, 15]]// [[18, 18], [10, 18], [18, 15]]
 
 gridexTypes.forEach((gridexType, gridexTypeIndex) => {
@@ -79,7 +79,7 @@ gridexTypes.forEach((gridexType, gridexTypeIndex) => {
               promise = expect(promise)
                 .to.emit(gridexLogic, "TransferSingle").withArgs(owner.address, "0x0000000000000000000000000000000000000000", owner.address, grid, Math.abs(sharesDelta))
             }
-            await promise.to.emit(gridexLogic, "ChangeShares").withArgs(owner.address, grid, sharesDelta, poolWithMyShare.totalShares.add(sharesDelta), pool.totalShares.add(sharesDelta), poolWithMyShare.totalShares.add(sharesDelta), soldRatio.toFixed())
+            await promise.to.emit(gridexLogic, "ChangeShares").withArgs(owner.address, grid, sharesDelta, pool.totalShares.add(sharesDelta), [pool.totalShares.add(sharesDelta), poolWithMyShare.totalShares.add(sharesDelta), soldRatio.toFixed()])
 
             let changedPoolWithMyShare = (await gridexLogic.getPoolAndMyShares(grid, grid + 1))[0];
             expect(changedPoolWithMyShare.totalShares).to.equal(poolWithMyShare.totalShares.add(sharesDelta))
@@ -236,10 +236,11 @@ gridexTypes.forEach((gridexType, gridexTypeIndex) => {
         for (let i = 0; i < events.length; i++) {
           const { args, event } = events[i];
           expect(event).to.equal("Buy")
-          const { grid: eventGrid, operator, gotStock, paidMoney, totalShares, totalStock, soldRatio } = args
+          const { grid: eventGrid, operator, gotStock, paidMoney, pool } = args
           expect(operator).to.equal(owner.address)
           expect(eventGrid).to.gte(grid).lte(grid + pools.length)
           const vaildPools = pools.filter(pool => pool.totalShares.gt(0))
+          const { totalShares, totalStock, soldRatio } = pool
           expect(totalShares).to.equal(vaildPools[i].totalShares)
           expect(totalStock).to.gte(vaildPools[i].totalStock)
           if (i !== events.length - 1) {
@@ -288,9 +289,10 @@ gridexTypes.forEach((gridexType, gridexTypeIndex) => {
         for (let i = 0; i < events.length; i++) {
           const { args, event } = events[i];
           expect(event).to.equal("Sell")
-          const { grid: eventGrid, operator, gotMoney, soldStock, totalShares, totalStock, soldRatio } = args
+          const { grid: eventGrid, operator, gotMoney, soldStock, pool } = args
           expect(operator).to.equal(owner.address)
           expect(eventGrid).to.gte(grid - pools.length).lte(grid)
+          const { totalShares, totalStock, soldRatio } = pool
           const vaildPools = pools.filter(pool => pool.totalShares.gt(0))
           expect(totalShares).to.equal(vaildPools[vaildPools.length - i - 1].totalShares)
           expect(totalStock).to.gte(vaildPools[vaildPools.length - i - 1].totalStock)
