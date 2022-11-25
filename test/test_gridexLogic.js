@@ -71,16 +71,16 @@ gridexTypes.forEach((gridexType, gridexTypeIndex) => {
             const moneyBalance0 = await money.balanceOf(owner.address);
             const pool = await gridexLogic.pools(grid);
             let { leftStockDelta, gotMoneyDelta } = await sharesUtil.calcChangeShares(gridexLogic.address, await gridexLogic.loadParams(), grid, pool, sharesDeltaAndSoldRatios[index].toFixed(0))
-            const promise = gridexLogic.changeShares(grid, sharesDeltaAndSoldRatios[index].toFixed(0))
+            let promise = gridexLogic.changeShares(grid, sharesDeltaAndSoldRatios[index].toFixed(0))
             if (sharesDelta.indexOf('-') === 0) {
-              await expect(promise)
+              promise = expect(promise)
                 .to.emit(gridexLogic, "TransferSingle").withArgs(owner.address, owner.address, "0x0000000000000000000000000000000000000000", grid, Math.abs(sharesDelta))
-                .to.emit(gridexLogic, "ChangeShares").withArgs(owner.address, grid, sharesDelta, poolWithMyShare.totalShares.add(sharesDelta), pool.totalShares.add(sharesDelta), poolWithMyShare.totalShares.add(sharesDelta), soldRatio.toFixed())
             } else {
-              await expect(promise)
+              promise = expect(promise)
                 .to.emit(gridexLogic, "TransferSingle").withArgs(owner.address, "0x0000000000000000000000000000000000000000", owner.address, grid, Math.abs(sharesDelta))
-                .to.emit(gridexLogic, "ChangeShares").withArgs(owner.address, grid, sharesDelta, poolWithMyShare.totalShares.add(sharesDelta), pool.totalShares.add(sharesDelta), poolWithMyShare.totalShares.add(sharesDelta), soldRatio.toFixed())
             }
+            await promise.to.emit(gridexLogic, "ChangeShares").withArgs(owner.address, grid, sharesDelta, poolWithMyShare.totalShares.add(sharesDelta), pool.totalShares.add(sharesDelta), poolWithMyShare.totalShares.add(sharesDelta), soldRatio.toFixed())
+
             let changedPoolWithMyShare = (await gridexLogic.getPoolAndMyShares(grid, grid + 1))[0];
             expect(changedPoolWithMyShare.totalShares).to.equal(poolWithMyShare.totalShares.add(sharesDelta))
             expect(changedPoolWithMyShare.myShares).to.equal(poolWithMyShare.myShares.add(sharesDelta))
