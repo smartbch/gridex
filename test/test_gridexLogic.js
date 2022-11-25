@@ -73,9 +73,13 @@ gridexTypes.forEach((gridexType, gridexTypeIndex) => {
             let { leftStockDelta, gotMoneyDelta } = await sharesUtil.calcChangeShares(gridexLogic.address, await gridexLogic.loadParams(), grid, pool, sharesDeltaAndSoldRatios[index].toFixed(0))
             const promise = gridexLogic.changeShares(grid, sharesDeltaAndSoldRatios[index].toFixed(0))
             if (sharesDelta.indexOf('-') === 0) {
-              await expect(promise).to.emit(gridexLogic, "TransferSingle").withArgs(owner.address, owner.address, "0x0000000000000000000000000000000000000000", grid, Math.abs(sharesDelta))
+              await expect(promise)
+                .to.emit(gridexLogic, "TransferSingle").withArgs(owner.address, owner.address, "0x0000000000000000000000000000000000000000", grid, Math.abs(sharesDelta))
+                .to.emit(gridexLogic, "ChangeShares").withArgs(owner.address, grid, sharesDelta, poolWithMyShare.totalShares.add(sharesDelta), pool.totalShares.add(sharesDelta), poolWithMyShare.totalShares.add(sharesDelta), soldRatio.toFixed())
             } else {
-              await expect(promise).to.emit(gridexLogic, "TransferSingle").withArgs(owner.address, "0x0000000000000000000000000000000000000000", owner.address, grid, Math.abs(sharesDelta))
+              await expect(promise)
+                .to.emit(gridexLogic, "TransferSingle").withArgs(owner.address, "0x0000000000000000000000000000000000000000", owner.address, grid, Math.abs(sharesDelta))
+                .to.emit(gridexLogic, "ChangeShares").withArgs(owner.address, grid, sharesDelta, poolWithMyShare.totalShares.add(sharesDelta), pool.totalShares.add(sharesDelta), poolWithMyShare.totalShares.add(sharesDelta), soldRatio.toFixed())
             }
             let changedPoolWithMyShare = (await gridexLogic.getPoolAndMyShares(grid, grid + 1))[0];
             expect(changedPoolWithMyShare.totalShares).to.equal(poolWithMyShare.totalShares.add(sharesDelta))
@@ -229,11 +233,18 @@ gridexTypes.forEach((gridexType, gridexTypeIndex) => {
         events = events.splice(0, events.length - 3)
         let totalGotStockByEvent = ethers.BigNumber.from(0)
         let totalPaidMoneyByEvent = ethers.BigNumber.from(0)
-        for (const { args, event } of events) {
+        for (let i = 0; i < events.length; i++) {
+          const { args, event } = events[i];
           expect(event).to.equal("Buy")
-          const { grid: eventGrid, operator, gotStock, paidMoney } = args
+          const { grid: eventGrid, operator, gotStock, paidMoney, totalShares, totalStock, soldRatio } = args
           expect(operator).to.equal(owner.address)
           expect(eventGrid).to.gte(grid).lte(grid + pools.length)
+          const vaildPools = pools.filter(pool => pool.totalShares.gt(0))
+          expect(totalShares).to.equal(vaildPools[i].totalShares)
+          expect(totalStock).to.gte(vaildPools[i].totalStock)
+          if (i !== events.length - 1) {
+            expect(soldRatio).to.equal(RatioBase.toFixed())
+          }
           totalGotStockByEvent = totalGotStockByEvent.add(gotStock)
           totalPaidMoneyByEvent = totalPaidMoneyByEvent.add(paidMoney)
         }
@@ -274,12 +285,18 @@ gridexTypes.forEach((gridexType, gridexTypeIndex) => {
         events = events.splice(0, events.length - 3)
         let totalGotMoneyByEvent = ethers.BigNumber.from(0)
         let totalSoldStockByEvent = ethers.BigNumber.from(0)
-        for (const { args, event } of events) {
+        for (let i = 0; i < events.length; i++) {
+          const { args, event } = events[i];
           expect(event).to.equal("Sell")
-          const { grid: eventGrid, operator, gotMoney, soldStock } = args
-          expect(operator).to.equal(owner.address)
+          const { grid: eventGrid, operator, gotMoney, soldStock, totalShares, totalStock, soldRatio } = args
           expect(operator).to.equal(owner.address)
           expect(eventGrid).to.gte(grid - pools.length).lte(grid)
+          const vaildPools = pools.filter(pool => pool.totalShares.gt(0))
+          expect(totalShares).to.equal(vaildPools[vaildPools.length - i - 1].totalShares)
+          expect(totalStock).to.gte(vaildPools[vaildPools.length - i - 1].totalStock)
+          if (i !== events.length - 1) {
+            expect(soldRatio).to.equal(0)
+          }
           totalGotMoneyByEvent = totalGotMoneyByEvent.add(gotMoney)
           totalSoldStockByEvent = totalSoldStockByEvent.add(soldStock)
         }
@@ -385,3 +402,4 @@ gridexTypes.forEach((gridexType, gridexTypeIndex) => {
     }
   });
 })
+// 

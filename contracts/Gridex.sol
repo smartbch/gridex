@@ -86,8 +86,9 @@ abstract contract GridexLogicAbstract is GridexLogicBase, ERC1155(""){
 	Pool[GridCount] public pools;
 	uint[MaskWordCount] internal maskWords;
 
-	event Buy(address indexed operator, uint grid, uint paidMoney, uint gotStock);
-	event Sell(address indexed operator, uint grid, uint gotMoney, uint soldStock);
+	event Buy(address indexed operator, uint grid, uint paidMoney, uint gotStock, uint96 totalShares, uint96 totalStock, uint64 soldRatio);
+	event Sell(address indexed operator, uint grid, uint gotMoney, uint soldStock, uint96 totalShares, uint96 totalStock, uint64 soldRatio);
+	event ChangeShares(address indexed operator, uint grid, int160 sharesDelta, uint256 myShares, uint96 totalShares, uint96 totalStock, uint64 soldRatio);
 
 	function grid2price(uint grid) public pure virtual returns (uint);
 	function price2Grid(uint price) pure external virtual returns (uint);
@@ -186,6 +187,7 @@ abstract contract GridexLogicAbstract is GridexLogicBase, ERC1155(""){
 		uint priceHi = grid2price(grid+1) * p.priceMul;
 		(leftStock, ,gotMoney) = calcPool(p.priceDiv,priceLo,priceHi,pool.totalStock,pool.soldRatio);
 		_mint(msg.sender, grid, pool.totalShares, "");
+		emit ChangeShares(msg.sender, grid, int160(uint160(pool.totalShares)), uint256(pool.totalShares), pool.totalShares, pool.totalStock, pool.soldRatio);
 		pools[grid] = pool;
 		bool bchExclusive = p.stock != SEP206Contract && p.money != SEP206Contract;
 		safeReceive(p.stock, leftStock, bchExclusive);
@@ -247,6 +249,7 @@ abstract contract GridexLogicAbstract is GridexLogicBase, ERC1155(""){
 				pools[grid] = pool;
 			}
 		}
+		emit ChangeShares(msg.sender, grid, sharesDelta, balanceOf(msg.sender, grid), pool.totalShares, pool.totalStock, pool.soldRatio);
 		Params memory p = loadParams();
 		int leftStockDelta;
 		int gotMoneyDelta;
@@ -306,7 +309,7 @@ abstract contract GridexLogicAbstract is GridexLogicBase, ERC1155(""){
 				totalGotStock += leftStockOld;
 				gotMoneyOld = gotMoneyNew-gotMoneyOld;
 				totalPaidMoney += gotMoneyOld;
-				emit Buy(msg.sender, grid, gotMoneyOld, leftStockOld);
+				emit Buy(msg.sender, grid, gotMoneyOld, leftStockOld, pool.totalShares, pool.totalStock, pool.soldRatio);
 			} else { // cannot buy all in pool
 				{
 				uint stockFee = stockToBuy*(fee_m_d>>128)/FeeBase; //fee in stock
@@ -322,7 +325,7 @@ abstract contract GridexLogicAbstract is GridexLogicBase, ERC1155(""){
 				totalPaidMoney += gotMoneyOld;
 				stockToBuy = 0;
 				}
-				emit Buy(msg.sender, grid, gotMoneyOld, leftStockOld);
+				emit Buy(msg.sender, grid, gotMoneyOld, leftStockOld, pool.totalShares, pool.totalStock, pool.soldRatio);
 			}
 			pools[grid] = pool;
 		}
@@ -358,7 +361,7 @@ abstract contract GridexLogicAbstract is GridexLogicBase, ERC1155(""){
 				stockToSell -= soldStockOldAndFee;
 				totalSoldStock += soldStockOldAndFee;
 				totalGotMoney += gotMoneyOld;
-				emit Sell(msg.sender, grid, gotMoneyOld, soldStockOldAndFee);
+				emit Sell(msg.sender, grid, gotMoneyOld, soldStockOldAndFee, pool.totalShares, pool.totalStock, pool.soldRatio);
 			} else { // cannot get all money all in pool
 				stockFee = stockToSell*(fee_m_d>>128)/FeeBase;
 				pool.totalStock += uint96(stockFee); // fee in stock
@@ -371,7 +374,7 @@ abstract contract GridexLogicAbstract is GridexLogicBase, ERC1155(""){
 				gotMoneyOld -= gotMoneyNew;
 				totalGotMoney += gotMoneyOld;
 				}
-				emit Sell(msg.sender, grid, gotMoneyOld, leftStockOld);
+				emit Sell(msg.sender, grid, gotMoneyOld, leftStockOld, pool.totalShares, pool.totalStock, pool.soldRatio);
 				stockToSell = 0;
 			}
 			pools[grid] = pool;
