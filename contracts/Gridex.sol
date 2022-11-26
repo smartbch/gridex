@@ -88,7 +88,7 @@ abstract contract GridexLogicAbstract is GridexLogicBase, ERC1155(""){
 
 	event Buy(address indexed operator, uint grid, uint paidMoney, uint gotStock, Pool pool);
 	event Sell(address indexed operator, uint grid, uint gotMoney, uint soldStock, Pool pool);
-	event ChangeShares(address indexed operator, uint grid, int160 sharesDelta, uint256 myShares, Pool pool);
+	event ChangeShares(address indexed operator, uint grid, int160 sharesDelta, Pool pool);
 
 	function grid2price(uint grid) public pure virtual returns (uint);
 	function price2Grid(uint price) pure external virtual returns (uint);
@@ -187,7 +187,7 @@ abstract contract GridexLogicAbstract is GridexLogicBase, ERC1155(""){
 		uint priceHi = grid2price(grid+1) * p.priceMul;
 		(leftStock, ,gotMoney) = calcPool(p.priceDiv,priceLo,priceHi,pool.totalStock,pool.soldRatio);
 		_mint(msg.sender, grid, pool.totalShares, "");
-		emit ChangeShares(msg.sender, grid, int160(uint160(pool.totalShares)), uint256(pool.totalShares), pool);
+		emit ChangeShares(msg.sender, grid, int160(uint160(pool.totalShares)), pool);
 		pools[grid] = pool;
 		bool bchExclusive = p.stock != SEP206Contract && p.money != SEP206Contract;
 		safeReceive(p.stock, leftStock, bchExclusive);
@@ -249,7 +249,7 @@ abstract contract GridexLogicAbstract is GridexLogicBase, ERC1155(""){
 				pools[grid] = pool;
 			}
 		}
-		emit ChangeShares(msg.sender, grid, sharesDelta, balanceOf(msg.sender, grid), pool);
+		emit ChangeShares(msg.sender, grid, sharesDelta, pool);
 		Params memory p = loadParams();
 		int leftStockDelta;
 		int gotMoneyDelta;
