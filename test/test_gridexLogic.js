@@ -79,7 +79,7 @@ gridexTypes.forEach((gridexType, gridexTypeIndex) => {
               promise = expect(promise)
                 .to.emit(gridexLogic, "TransferSingle").withArgs(owner.address, "0x0000000000000000000000000000000000000000", owner.address, grid, Math.abs(sharesDelta))
             }
-            await promise.to.emit(gridexLogic, "ChangeShares").withArgs(owner.address, grid, sharesDelta, [pool.totalShares.add(sharesDelta), poolWithMyShare.totalShares.add(sharesDelta), soldRatio.toFixed()])
+            await promise.to.emit(gridexLogic, "ChangeShares").withArgs(owner.address, grid, sharesDelta, leftStockDelta, gotMoneyDelta, [pool.totalShares.add(sharesDelta), poolWithMyShare.totalShares.add(sharesDelta), soldRatio.toFixed()])
 
             let changedPoolWithMyShare = (await gridexLogic.getPoolAndMyShares(grid, grid + 1))[0];
             expect(changedPoolWithMyShare.totalShares).to.equal(poolWithMyShare.totalShares.add(sharesDelta))
